@@ -72,6 +72,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { postsApi, uploadImageWithProgress, type PostContent, type PostMeta } from "../lib/api";
+import { useAuth } from "../lib/auth";
 import { slugify } from "../lib/utils";
 import { useToast } from "../lib/toast";
 import { Button, Card, Field, Input, Label, Toggle } from "./ui";
@@ -154,6 +155,7 @@ export default function PostEditor({ slug, onBack, onSaved }: Props) {
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
 
   const toast = useToast();
+  const { requireLogin } = useAuth();
   const showMessage = useCallback(
     (text: string, type: "success" | "error") => toast(text, type),
     [toast],
@@ -275,11 +277,17 @@ export default function PostEditor({ slug, onBack, onSaved }: Props) {
     });
   }
 
-  async function handleFileUpload(file: File) {
+  function handleFileUpload(file: File) {
     if (!file.type.startsWith("image/")) {
       showMessage("仅支持上传图片文件", "error");
       return;
     }
+    requireLogin(() => {
+      void doFileUpload(file);
+    });
+  }
+
+  async function doFileUpload(file: File) {
     try {
       const url = await uploadImageWithProgress(file, setUploadProgress);
       setUploadProgress(null);
@@ -343,7 +351,7 @@ export default function PostEditor({ slug, onBack, onSaved }: Props) {
     return btns;
   }, [content]);
 
-  async function handleSave() {
+  function handleSave() {
     if (!postSlug.trim()) {
       showMessage("请输入 Slug", "error");
       return;
@@ -352,6 +360,12 @@ export default function PostEditor({ slug, onBack, onSaved }: Props) {
       showMessage("请输入标题", "error");
       return;
     }
+    requireLogin(() => {
+      void doSave();
+    });
+  }
+
+  async function doSave() {
     setSaving(true);
     try {
       const frontmatter: Record<string, unknown> = {
@@ -411,11 +425,18 @@ export default function PostEditor({ slug, onBack, onSaved }: Props) {
     }
   }
 
-  async function handleDelete() {
+  function handleDelete() {
     if (!slug) return;
     if (!confirm("确定要删除这篇文章吗？")) return;
+    const target = slug;
+    requireLogin(() => {
+      void doDelete(target);
+    });
+  }
+
+  async function doDelete(target: string) {
     try {
-      await postsApi.delete(slug);
+      await postsApi.delete(target);
       showMessage("文章已删除", "success");
       setTimeout(() => onSaved(null), 800);
     } catch (err: unknown) {

@@ -3,6 +3,7 @@ import {
   ExternalLink,
   FileText,
   Images,
+  LogIn,
   LogOut,
   Menu,
   Pencil,
@@ -10,13 +11,13 @@ import {
   Settings,
   X,
 } from "lucide-react";
-import { clearAuth, isAuthenticated, postsApi, type PostMeta } from "./lib/api";
+import { postsApi, type PostMeta } from "./lib/api";
+import { useAuth } from "./lib/auth";
 import { cn } from "./lib/utils";
 import { BackToTop, toHash, useHashRoute, type View } from "./lib/router";
 import { useToast } from "./lib/toast";
 import ConfigEditor from "./components/ConfigEditor";
 import ImageManager from "./components/ImageManager";
-import Login from "./components/Login";
 import PostList from "./components/PostList";
 
 const PostEditor = lazy(() => import("./components/PostEditor"));
@@ -31,7 +32,7 @@ const NAV: { id: View; label: string; icon: React.ReactNode }[] = [
 ];
 
 export default function App() {
-  const [loggedIn, setLoggedIn] = useState(isAuthenticated());
+  const { loggedIn, logout, openLogin } = useAuth();
   const route = useHashRoute();
   const view = route.view;
   const editingSlug = route.view === "editor" ? (route.slug ?? null) : null;
@@ -62,9 +63,16 @@ export default function App() {
     }
   }, [toast]);
 
+  // 始终允许调用 API 加载列表 (未登录时返回 401, 统一提示"请先登录");
+  // 登录状态变化 (登录/登出/401 失效) 时重新加载
   useEffect(() => {
-    if (loggedIn && posts === null) loadPosts();
-  }, [loggedIn, posts, loadPosts]);
+    loadPosts();
+  }, [loggedIn, loadPosts]);
+
+  // 401 使登录失效时清空列表, 避免显示过期数据
+  useEffect(() => {
+    if (!loggedIn) setPosts(null);
+  }, [loggedIn]);
 
   function navigate(next: View, slug?: string) {
     const prev = view;
@@ -88,9 +96,8 @@ export default function App() {
   }
 
   function handleLogout() {
-    clearAuth();
+    logout();
     setPosts(null);
-    setLoggedIn(false);
   }
 
   /** 保存/更新文章: 前端本地更新列表, 不重新请求 */
@@ -113,10 +120,6 @@ export default function App() {
   /** 列表页删除文章: 前端本地移除, 不重新请求 */
   function handlePostDeleted(slug: string) {
     setPosts((prev) => (prev ? prev.filter((p) => p.slug !== slug) : prev));
-  }
-
-  if (!loggedIn) {
-    return <Login onLogin={() => setLoggedIn(true)} />;
   }
 
   const navItem = (item: (typeof NAV)[number], isMobile = false) => {
@@ -187,14 +190,25 @@ export default function App() {
             >
               <ExternalLink className="h-3.5 w-3.5" />
             </a>
-            <button
-              type="button"
-              onClick={handleLogout}
-              title="退出登录"
-              className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors duration-75 hover:bg-card-hover hover:text-accent"
-            >
-              <LogOut className="h-3.5 w-3.5" />
-            </button>
+            {loggedIn ? (
+              <button
+                type="button"
+                onClick={handleLogout}
+                title="退出登录"
+                className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors duration-75 hover:bg-card-hover hover:text-accent"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={openLogin}
+                title="登录"
+                className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors duration-75 hover:bg-card-hover hover:text-foreground"
+              >
+                <LogIn className="h-3.5 w-3.5" />
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setMenuOpen(!menuOpen)}
@@ -240,14 +254,25 @@ export default function App() {
               <ExternalLink className="h-3.5 w-3.5" />
               返回首页
             </a>
-            <button
-              type="button"
-              onClick={handleLogout}
-              className="flex w-full cursor-pointer items-center gap-2 rounded-md px-4 py-2.5 font-mono text-sm text-accent transition-colors duration-75 hover:bg-accent hover:text-background"
-            >
-              <LogOut className="h-3.5 w-3.5" />
-              退出登录
-            </button>
+            {loggedIn ? (
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="flex w-full cursor-pointer items-center gap-2 rounded-md px-4 py-2.5 font-mono text-sm text-accent transition-colors duration-75 hover:bg-accent hover:text-background"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                退出登录
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={openLogin}
+                className="flex w-full cursor-pointer items-center gap-2 rounded-md px-4 py-2.5 font-mono text-sm text-muted-foreground transition-colors duration-75 hover:bg-card-hover hover:text-foreground"
+              >
+                <LogIn className="h-3.5 w-3.5" />
+                登录
+              </button>
+            )}
           </nav>
         </div>
       )}

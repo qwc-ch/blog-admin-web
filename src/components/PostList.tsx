@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { FileText, Pencil, Plus, Trash2 } from "lucide-react";
 import { postsApi, type PostMeta } from "../lib/api";
+import { useAuth } from "../lib/auth";
 import { formatDate, getCats } from "../lib/utils";
 import { useToast } from "../lib/toast";
 import { Badge, Button, EmptyState, PageHeader } from "./ui";
@@ -23,6 +24,7 @@ export default function PostList({
   onDeleted,
 }: Props) {
   const toast = useToast();
+  const { requireLogin } = useAuth();
 
   const filtered = useMemo(() => {
     const list = posts ?? [];
@@ -37,15 +39,19 @@ export default function PostList({
     );
   }, [posts, searchQuery]);
 
-  async function handleDelete(slug: string) {
+  function handleDelete(slug: string) {
     if (!confirm(`确定要删除文章 "${slug}" 吗？`)) return;
-    try {
-      await postsApi.delete(slug);
-      toast("文章已删除");
-      onDeleted(slug);
-    } catch (err: unknown) {
-      toast(err instanceof Error ? err.message : "删除失败", "error");
-    }
+    requireLogin(() => {
+      void (async () => {
+        try {
+          await postsApi.delete(slug);
+          toast("文章已删除");
+          onDeleted(slug);
+        } catch (err: unknown) {
+          toast(err instanceof Error ? err.message : "删除失败", "error");
+        }
+      })();
+    });
   }
 
   return (

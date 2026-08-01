@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Copy, Image as ImageIcon, Loader2, Trash2, Upload } from "lucide-react";
 import { imagesApi, type ImageItem } from "../lib/api";
+import { useAuth } from "../lib/auth";
 import { formatSize } from "../lib/utils";
 import { useToast } from "../lib/toast";
 import { Button, EmptyState, PageHeader } from "./ui";
@@ -10,7 +11,9 @@ export default function ImageManager() {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const pendingFilesRef = useRef<File[]>([]);
   const toast = useToast();
+  const { requireLogin } = useAuth();
 
   useEffect(() => {
     loadImages();
@@ -27,11 +30,19 @@ export default function ImageManager() {
     }
   }
 
-  async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
+  function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files || []);
     e.target.value = "";
     if (!files.length) return;
+    pendingFilesRef.current = files;
+    requireLogin(() => {
+      void doUpload();
+    });
+  }
 
+  async function doUpload() {
+    const files = pendingFilesRef.current;
+    if (!files.length) return;
     setUploading(true);
     let success = 0;
     let failed = 0;
@@ -53,15 +64,19 @@ export default function ImageManager() {
     await loadImages();
   }
 
-  async function handleDelete(key: string) {
+  function handleDelete(key: string) {
     if (!confirm(`确定要删除图片 "${key}" 吗？`)) return;
-    try {
-      await imagesApi.delete(key);
-      toast("图片已删除");
-      await loadImages();
-    } catch (err: unknown) {
-      toast(err instanceof Error ? err.message : "删除失败", "error");
-    }
+    requireLogin(() => {
+      void (async () => {
+        try {
+          await imagesApi.delete(key);
+          toast("图片已删除");
+          await loadImages();
+        } catch (err: unknown) {
+          toast(err instanceof Error ? err.message : "删除失败", "error");
+        }
+      })();
+    });
   }
 
   function copyUrl(url: string) {

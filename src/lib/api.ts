@@ -17,6 +17,13 @@ export function isAuthenticated(): boolean {
   return !!getToken();
 }
 
+let unauthorizedHandler: (() => void) | null = null;
+
+/** 注册 401 处理回调 (由 AuthProvider 注册, 用于弹出登录框) */
+export function setUnauthorizedHandler(handler: (() => void) | null) {
+  unauthorizedHandler = handler;
+}
+
 export async function login(username: string, password: string): Promise<void> {
   const auth = btoa(`${username}:${password}`);
   const res = await fetch(`${API_BASE}/api/auth/login`, {
@@ -63,7 +70,8 @@ async function request(
 
   if (res.status === 401) {
     clearAuth();
-    throw new Error("认证失败，请重新登录");
+    unauthorizedHandler?.();
+    throw new Error("请先登录");
   }
 
   if (!res.ok) {
@@ -165,7 +173,8 @@ export function uploadImageWithProgress(
         }
       } else if (xhr.status === 401) {
         clearAuth();
-        reject(new Error("认证失败，请重新登录"));
+        unauthorizedHandler?.();
+        reject(new Error("请先登录"));
       } else if (xhr.status === 429) {
         reject(new Error("上传过于频繁，请稍后重试"));
       } else {

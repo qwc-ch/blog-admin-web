@@ -3,12 +3,15 @@ import { createRoot } from "react-dom/client";
 import "highlight.js/styles/github-dark.css";
 import "./index.css";
 import App from "./App";
+import { AuthProvider } from "./lib/auth";
 import { ToastProvider } from "./lib/toast";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ToastProvider>
-      <App />
+      <AuthProvider>
+        <App />
+      </AuthProvider>
     </ToastProvider>
   </StrictMode>,
 );

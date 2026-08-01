@@ -29,11 +29,14 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const idRef = useRef(0);
 
   const show = useCallback<ShowToast>((text, type = "success") => {
-    const id = ++idRef.current;
-    setToasts((t) => [...t, { id, type, text }]);
-    setTimeout(() => {
-      setToasts((t) => t.filter((x) => x.id !== id));
-    }, 3000);
+    setToasts((t) => {
+      if (t.some((x) => x.text === text)) return t;
+      const id = ++idRef.current;
+      setTimeout(() => {
+        setToasts((t2) => t2.filter((x) => x.id !== id));
+      }, 3000);
+      return [...t, { id, type, text }];
+    });
   }, []);
 
   return (

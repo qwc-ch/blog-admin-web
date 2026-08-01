@@ -7,6 +7,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { friendsConfigApi, siteConfigApi } from "../lib/api";
+import { useAuth } from "../lib/auth";
 import { cn } from "../lib/utils";
 import { useToast } from "../lib/toast";
 import { Button, Card, Field, Input, PageHeader, Select, Textarea, Toggle } from "./ui";
@@ -153,6 +154,7 @@ export default function ConfigEditor() {
   const [saving, setSaving] = useState(false);
   const [open, setOpen] = useState<Set<string>>(new Set(["main"]));
   const toast = useToast();
+  const { requireLogin } = useAuth();
 
   useEffect(() => {
     setLoading(true);
@@ -205,7 +207,13 @@ export default function ConfigEditor() {
 
   const themeHue = num("themeColor.hue", 330);
 
-  async function handleSave() {
+  function handleSave() {
+    requireLogin(() => {
+      void doSave();
+    });
+  }
+
+  async function doSave() {
     setSaving(true);
     try {
       const { friends: _f, friendsPage: _fp, ...siteConfigData } = config;

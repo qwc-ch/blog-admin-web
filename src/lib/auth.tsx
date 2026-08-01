@@ -37,9 +37,12 @@ export function useAuth(): AuthContextValue {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [loggedIn, setLoggedIn] = useState(isAuthenticated());
-  const [loginOpen, setLoginOpen] = useState(false);
-  const [loginError, setLoginError] = useState<string | null>(null);
+  // OAuth 回调在首次渲染时处理: 立即保存 token / 记录错误。
+  // 必须在子组件 (App) 发起请求前完成, 否则首次请求不带 token 会 401
+  const [oauth] = useState(() => handleOAuthCallback());
+  const [loggedIn, setLoggedIn] = useState(() => oauth.ok || isAuthenticated());
+  const [loginOpen, setLoginOpen] = useState(() => !!oauth.error);
+  const [loginError, setLoginError] = useState<string | null>(oauth.error);
   const loggedInRef = useRef(loggedIn);
 
   useEffect(() => {
@@ -47,15 +50,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [loggedIn]);
 
   useEffect(() => {
-    // OAuth 回调: 读取并保存 token / 展示错误, 并清理 URL
-    const { ok, error } = handleOAuthCallback();
-    if (error) {
-      setLoginError(error);
-      setLoginOpen(true);
-    } else if (ok) {
-      setLoggedIn(true);
-    }
-
     // 请求返回 401 (token 失效): 只同步登录状态, 不自动弹框;
     // 之后用户执行写操作 (requireLogin) 时自然会弹出登录框
     setUnauthorizedHandler(() => {

@@ -63,16 +63,15 @@ export default function App() {
     }
   }, [toast]);
 
-  // 始终允许调用 API 加载列表 (未登录时返回 401, 统一提示"请先登录");
-  // 登录状态变化 (登录/登出/401 失效) 时重新加载
+  // 仅登录后加载列表; 登录状态变化 (登录/登出/401 失效) 时重新加载或清空
   useEffect(() => {
-    loadPosts();
+    if (loggedIn) {
+      loadPosts();
+    } else {
+      setPosts(null);
+      setPostsLoading(false);
+    }
   }, [loggedIn, loadPosts]);
-
-  // 401 使登录失效时清空列表, 避免显示过期数据
-  useEffect(() => {
-    if (!loggedIn) setPosts(null);
-  }, [loggedIn]);
 
   function navigate(next: View, slug?: string) {
     const prev = view;

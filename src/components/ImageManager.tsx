@@ -13,11 +13,16 @@ export default function ImageManager() {
   const inputRef = useRef<HTMLInputElement>(null);
   const pendingFilesRef = useRef<File[]>([]);
   const toast = useToast();
-  const { requireLogin } = useAuth();
+  const { requireLogin, loggedIn } = useAuth();
 
   useEffect(() => {
-    loadImages();
-  }, []);
+    if (loggedIn) {
+      loadImages();
+    } else {
+      setImages([]);
+      setLoading(false);
+    }
+  }, [loggedIn]);
 
   async function loadImages() {
     setLoading(true);

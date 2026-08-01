@@ -155,7 +155,7 @@ export default function PostEditor({ slug, onBack, onSaved }: Props) {
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
 
   const toast = useToast();
-  const { requireLogin } = useAuth();
+  const { requireLogin, loggedIn } = useAuth();
   const showMessage = useCallback(
     (text: string, type: "success" | "error") => toast(text, type),
     [toast],
@@ -167,6 +167,7 @@ export default function PostEditor({ slug, onBack, onSaved }: Props) {
 
   useEffect(() => {
     if (!slug) return;
+    if (!loggedIn) return;
     setLoading(true);
     postsApi
       .get(slug)
@@ -199,7 +200,7 @@ export default function PostEditor({ slug, onBack, onSaved }: Props) {
       )
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slug]);
+  }, [slug, loggedIn]);
 
   const previewHtml = useMemo(() => {
     if (!content.trim()) {

@@ -154,9 +154,13 @@ export default function ConfigEditor() {
   const [saving, setSaving] = useState(false);
   const [open, setOpen] = useState<Set<string>>(new Set(["main"]));
   const toast = useToast();
-  const { requireLogin } = useAuth();
+  const { requireLogin, loggedIn } = useAuth();
 
   useEffect(() => {
+    if (!loggedIn) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     Promise.all([
       siteConfigApi.get(),
@@ -177,7 +181,7 @@ export default function ConfigEditor() {
         toast(err instanceof Error ? err.message : "加载失败", "error");
       })
       .finally(() => setLoading(false));
-  }, [toast]);
+  }, [toast, loggedIn]);
 
   const toggleSection = (id: string) => {
     const y = window.scrollY;

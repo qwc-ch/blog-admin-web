@@ -1,27 +1,36 @@
-import { useEffect, useState, type FormEvent } from "react";
-import { ShieldCheck, Terminal, X } from "lucide-react";
-import { login } from "../lib/api";
-import { Button, Input, Label, Message } from "./ui";
+import { useEffect, useState } from "react";
+import { Github, ShieldCheck, X } from "lucide-react";
+import { githubLoginUrl } from "../lib/api";
+import { Button, Message } from "./ui";
 
 interface Props {
   open: boolean;
   onClose: () => void;
-  onLogin: () => void;
+  /** OAuth 回调返回的错误 key, 在打开弹窗时显示 */
+  initialError?: string | null;
 }
 
-export default function LoginModal({ open, onClose, onLogin }: Props) {
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
+const ERROR_MESSAGES: Record<string, string> = {
+  missing_params: "登录请求参数不完整，请重试",
+  invalid_state: "登录状态已失效，请重新发起登录",
+  not_authorized: "该 GitHub 账号无权访问管理后台",
+  bad_code: "GitHub 授权失败，请重试",
+  github_api: "GitHub 服务异常，请稍后重试",
+  network_error: "网络异常，请稍后重试",
+};
+
+export default function LoginModal({ open, onClose, initialError }: Props) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (open) {
-      setError("");
-      setPassword("");
+      setError(
+        initialError ? (ERROR_MESSAGES[initialError] ?? "登录失败，请重试") : "",
+      );
       setLoading(false);
     }
-  }, [open]);
+  }, [open, initialError]);
 
   useEffect(() => {
     if (!open) return;
@@ -34,17 +43,10 @@ export default function LoginModal({ open, onClose, onLogin }: Props) {
 
   if (!open) return null;
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
+  function handleGithubLogin() {
     setError("");
     setLoading(true);
-    try {
-      await login(username, password);
-      onLogin();
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "连接失败，请检查网络");
-      setLoading(false);
-    }
+    window.location.href = githubLoginUrl();
   }
 
   return (
@@ -70,49 +72,31 @@ export default function LoginModal({ open, onClose, onLogin }: Props) {
           <div className="text-center">
             <h2 className="text-base font-bold tracking-tight">登录</h2>
             <p className="mt-0.5 font-mono text-xs text-muted-foreground">
-              登录后即可进行保存 / 上传等操作
+              使用 GitHub 账号登录后即可进行保存 / 上传等操作
             </p>
           </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="username">username</Label>
-            <Input
-              id="username"
-              type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="输入用户名"
-              autoComplete="username"
-              required
-              autoFocus
-            />
+        {error && (
+          <div className="mb-4">
+            <Message type="error">{error}</Message>
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="password">password</Label>
-            <Input
-              id="password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="输入密码"
-              autoComplete="current-password"
-              required
-            />
-          </div>
+        )}
 
-          {error && <Message type="error">{error}</Message>}
+        <Button
+          type="button"
+          onClick={handleGithubLogin}
+          disabled={loading}
+          className="w-full"
+        >
+          <Github className="h-4 w-4" />
+          {loading ? "正在跳转 GitHub..." : "使用 GitHub 登录"}
+        </Button>
 
-          <Button type="submit" disabled={loading} className="w-full">
-            {loading ? "登录中..." : "登录"}
-          </Button>
-
-          <div className="flex items-center justify-center gap-1.5 pt-1 font-mono text-[10px] text-muted-foreground">
-            <Terminal className="h-3 w-3" />
-            <span>basic auth · bearer token</span>
-          </div>
-        </form>
+        <div className="mt-4 flex items-center justify-center gap-1.5 pt-1 font-mono text-[10px] text-muted-foreground">
+          <ShieldCheck className="h-3 w-3" />
+          <span>仅允许授权账号 · oauth</span>
+        </div>
       </div>
     </div>
   );

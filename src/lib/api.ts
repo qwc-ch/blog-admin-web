@@ -24,22 +24,22 @@ export function setUnauthorizedHandler(handler: (() => void) | null) {
   unauthorizedHandler = handler;
 }
 
-export async function login(username: string, password: string): Promise<void> {
-  const auth = btoa(`${username}:${password}`);
-  const res = await fetch(`${API_BASE}/api/auth/login`, {
-    method: "POST",
-    headers: { Authorization: `Basic ${auth}` },
-  });
+/** 跳转到 GitHub 授权页 (完整浏览器跳转) */
+export function githubLoginUrl(): string {
+  return `${API_BASE}/api/auth/github`;
+}
 
-  if (res.status === 429) {
-    throw new Error("登录尝试过于频繁，请 15 分钟后重试");
-  }
-  if (!res.ok) {
-    throw new Error("用户名或密码错误");
-  }
-
-  const data = (await res.json()) as { token: string; expires_in: number };
-  setToken(data.token);
+/** 处理 OAuth 回调 URL: 读取 token/error, 保存 token, 清理 URL。返回结果 */
+export function handleOAuthCallback(): { ok: boolean; error: string | null } {
+  const params = new URLSearchParams(window.location.search);
+  const token = params.get("token");
+  const error = params.get("error");
+  if (!token && !error) return { ok: false, error: null };
+  if (token) setToken(token);
+  // 立即清理 URL, 防止 token/error 留在地址栏和浏览器历史里
+  const cleanUrl = `${window.location.pathname}${window.location.hash}`;
+  window.history.replaceState({}, "", cleanUrl);
+  return { ok: !!token, error };
 }
 
 async function request(

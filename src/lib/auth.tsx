@@ -7,12 +7,17 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { clearAuth, isAuthenticated, setUnauthorizedHandler } from "./api";
+import {
+  clearAuth,
+  handleOAuthCallback,
+  isAuthenticated,
+  setUnauthorizedHandler,
+} from "./api";
 import LoginModal from "../components/Login";
 
 interface AuthContextValue {
   loggedIn: boolean;
-  /** 需要登录才能继续的操作: 未登录时先弹登录框, 登录成功后自动执行 action */
+  /** 需要登录才能继续的操作: 未登录时先弹登录框 (GitHub 跳转登录, 登录后返回需重新操作) */
   requireLogin: (action: () => void) => void;
   openLogin: () => void;
   closeLogin: () => void;
@@ -34,14 +39,23 @@ export function useAuth(): AuthContextValue {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [loggedIn, setLoggedIn] = useState(isAuthenticated());
   const [loginOpen, setLoginOpen] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
   const loggedInRef = useRef(loggedIn);
-  const pendingRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     loggedInRef.current = loggedIn;
   }, [loggedIn]);
 
   useEffect(() => {
+    // OAuth 回调: 读取并保存 token / 展示错误, 并清理 URL
+    const { ok, error } = handleOAuthCallback();
+    if (error) {
+      setLoginError(error);
+      setLoginOpen(true);
+    } else if (ok) {
+      setLoggedIn(true);
+    }
+
     // 请求返回 401 (token 失效): 只同步登录状态, 不自动弹框;
     // 之后用户执行写操作 (requireLogin) 时自然会弹出登录框
     setUnauthorizedHandler(() => {
@@ -56,32 +70,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (loggedInRef.current) {
       action();
     } else {
-      pendingRef.current = action;
       setLoginOpen(true);
     }
   }, []);
 
   const openLogin = useCallback(() => {
-    pendingRef.current = null;
+    setLoginError(null);
     setLoginOpen(true);
   }, []);
 
   const closeLogin = useCallback(() => {
     setLoginOpen(false);
-    pendingRef.current = null;
+    setLoginError(null);
   }, []);
 
   const logout = useCallback(() => {
     clearAuth();
     setLoggedIn(false);
-  }, []);
-
-  const handleLoginSuccess = useCallback(() => {
-    setLoggedIn(true);
-    setLoginOpen(false);
-    const pending = pendingRef.current;
-    pendingRef.current = null;
-    pending?.();
   }, []);
 
   return (
@@ -92,7 +97,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       <LoginModal
         open={loginOpen}
         onClose={closeLogin}
-        onLogin={handleLoginSuccess}
+        initialError={loginError}
       />
     </AuthContext.Provider>
   );

@@ -150,6 +150,8 @@ export default function ConfigEditor() {
   const [friendsPage, setFriendsPage] = useState<Record<string, unknown>>({});
   const [sha, setSha] = useState("");
   const [friendsSha, setFriendsSha] = useState("");
+  const [siteDirty, setSiteDirty] = useState(false);
+  const [friendsDirty, setFriendsDirty] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [open, setOpen] = useState<Set<string>>(new Set(["main"]));
@@ -197,8 +199,10 @@ export default function ConfigEditor() {
     });
   };
 
-  const set = (path: string, value: unknown) =>
+  const set = (path: string, value: unknown) => {
     setConfig((c) => setNested(c, path, value));
+    setSiteDirty(true);
+  };
 
   const get = (path: string) => getNested(config, path);
 
@@ -212,6 +216,10 @@ export default function ConfigEditor() {
   const themeHue = num("themeColor.hue", 330);
 
   function handleSave() {
+    if (!siteDirty && !friendsDirty) {
+      toast("没有需要保存的更改");
+      return;
+    }
     requireLogin(() => {
       void doSave();
     });
@@ -221,21 +229,31 @@ export default function ConfigEditor() {
     setSaving(true);
     try {
       const { friends: _f, friendsPage: _fp, ...siteConfigData } = config;
-      await Promise.all([
-        siteConfigApi.save(siteConfigData, sha, "Update site config via admin"),
-        friendsConfigApi.save(
-          friends,
-          friendsPage,
-          friendsSha,
-          "Update friends config via admin",
-        ),
-      ]);
+      const saves: Promise<unknown>[] = [];
+      if (siteDirty) {
+        saves.push(
+          siteConfigApi.save(siteConfigData, sha, "Update site config via admin"),
+        );
+      }
+      if (friendsDirty) {
+        saves.push(
+          friendsConfigApi.save(
+            friends,
+            friendsPage,
+            friendsSha,
+            "Update friends config via admin",
+          ),
+        );
+      }
+      await Promise.all(saves);
       const [siteRes, friendsRes] = await Promise.all([
         siteConfigApi.get(),
         friendsConfigApi.get(),
       ]);
       setSha(siteRes.sha);
       setFriendsSha(friendsRes.sha);
+      setSiteDirty(false);
+      setFriendsDirty(false);
       toast("配置已保存并提交到 GitHub");
     } catch (err: unknown) {
       toast(err instanceof Error ? err.message : "保存失败", "error");
@@ -258,6 +276,12 @@ export default function ConfigEditor() {
     setFriends((prev) =>
       prev.map((f, i) => (i === index ? { ...f, ...patch } : f)),
     );
+    setFriendsDirty(true);
+  }
+
+  function updateFriendPage(patch: Record<string, unknown>) {
+    setFriendsPage((p) => ({ ...p, ...patch }));
+    setFriendsDirty(true);
   }
 
   const pageToggles: [string, string][] = [
@@ -534,7 +558,10 @@ export default function ConfigEditor() {
                   <Button
                     size="sm"
                     variant="danger"
-                    onClick={() => setFriends((prev) => prev.filter((_, idx) => idx !== i))}
+                    onClick={() => {
+                      setFriends((prev) => prev.filter((_, idx) => idx !== i));
+                      setFriendsDirty(true);
+                    }}
                   >
                     <Trash2 className="h-3 w-3" />
                     删除
@@ -546,12 +573,13 @@ export default function ConfigEditor() {
             <div className="flex justify-center py-1">
               <Button
                 variant="outline"
-                onClick={() =>
+                onClick={() => {
                   setFriends((prev) => [
                     ...prev,
                     { title: "", imgurl: "", desc: "", siteurl: "", rss: "", tags: [], weight: 10, enabled: true },
-                  ])
-                }
+                  ]);
+                  setFriendsDirty(true);
+                }}
               >
                 <Plus className="h-3.5 w-3.5" />
                 添加友链
@@ -565,29 +593,29 @@ export default function ConfigEditor() {
               <Field label="页面标题（留空使用默认）">
                 <Input
                   value={str2(friendsPage, "title")}
-                  onChange={(e) => setFriendsPage((p) => ({ ...p, title: e.target.value }))}
+                  onChange={(e) => updateFriendPage({ title: e.target.value })}
                 />
               </Field>
               <Field label="页面描述（留空使用默认）">
                 <Input
                   value={str2(friendsPage, "description")}
-                  onChange={(e) => setFriendsPage((p) => ({ ...p, description: e.target.value }))}
+                  onChange={(e) => updateFriendPage({ description: e.target.value })}
                 />
               </Field>
               <ToggleField
                 label="显示自定义内容"
                 checked={bool2(friendsPage, "showCustomContent", true)}
-                onChange={(v) => setFriendsPage((p) => ({ ...p, showCustomContent: v }))}
+                onChange={(v) => updateFriendPage({ showCustomContent: v })}
               />
               <ToggleField
                 label="显示评论区"
                 checked={bool2(friendsPage, "showComment", true)}
-                onChange={(v) => setFriendsPage((p) => ({ ...p, showComment: v }))}
+                onChange={(v) => updateFriendPage({ showComment: v })}
               />
               <ToggleField
                 label="随机排序（忽略权重）"
                 checked={bool2(friendsPage, "randomizeSort", false)}
-                onChange={(v) => setFriendsPage((p) => ({ ...p, randomizeSort: v }))}
+                onChange={(v) => updateFriendPage({ randomizeSort: v })}
               />
             </div>
           </Section>

@@ -46,6 +46,15 @@ body.ff-dragging {
 body.ff-dragging * {
 	pointer-events: none;
 }
+/* 看板娘拖动：只禁选中和触摸滚动，不禁 pointer-events（否则 iframe 里的模型交互会失灵） */
+body.ff-l2d-dragging {
+	overflow: hidden;
+}
+body.ff-l2d-dragging * {
+	-webkit-user-select: none !important;
+	user-select: none !important;
+	touch-action: none !important;
+}
 body {
 	font-family: 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
 	background: linear-gradient(155deg, #eafaf6 0%, #f4fbf8 45%, #fdf8ef 100%);
@@ -433,6 +442,55 @@ fieldset.group > legend {
 	.cc-editor {
 		width: 100% !important;
 		min-width: 0 !important;
+	}
+	/* 移动端编辑器内部：给足高度，工具栏允许换行但紧凑，编辑区不再被压缩没 */
+	.cm-editor {
+		height: 62vh !important;
+		min-height: 420px !important;
+		overflow-y: auto !important;
+	}
+	.cm-editor > .row {
+		flex-wrap: wrap !important;
+		row-gap: 6px !important;
+	}
+	/* 文件列表横向 chips 的配套：按钮组横滚，避免把保存/删除挤出屏幕 */
+	.cm-editor .row .row {
+		flex-wrap: wrap !important;
+	}
+	/* 移动端文件列表：改成**横向滚动 chips**，不再占 1/3 屏高、不把编辑器挤没。
+	   组件里 .cm-list 是纵向 flex + overflow:auto，这里覆盖为横排 + 水平滚动；
+	   搜索框单独占一行，chips 在下面横向滚。 */
+	.cm-list {
+		flex-direction: column !important;
+		align-items: stretch !important;
+		gap: 8px !important;
+		height: auto !important;
+		max-height: none !important;
+		padding: 10px 12px !important;
+	}
+	.cm-list > input {
+		width: 100% !important;
+		max-width: none !important;
+		margin-bottom: 0 !important;
+	}
+	.cm-list .cm-chips {
+		display: flex;
+		flex-direction: row !important;
+		align-items: center !important;
+		gap: 8px !important;
+		overflow-x: auto !important;
+		overflow-y: hidden !important;
+		white-space: nowrap;
+		-webkit-overflow-scrolling: touch;
+		padding-bottom: 2px;
+	}
+	.cm-item {
+		display: inline-flex !important;
+		width: auto !important;
+		max-width: 72vw;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		flex-shrink: 0;
 	}
 	/* 堆叠之后横向拖拽条没有意义（而且宽度只剩 9px 会变成一条竖线），直接隐藏 */
 	.dragbar {

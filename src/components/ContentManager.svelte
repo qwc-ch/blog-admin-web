@@ -572,11 +572,13 @@
 <div class="cm-layout">
 	<div class="card cm-list">
 		<input placeholder="搜索文件…" bind:value={filter} style="margin-bottom:8px" />
-		{#each filtered as it}
-			<button class="cm-item" class:active={active === it.rel} onclick={() => open(it.rel)} title={it.rel}>
-				{it.rel.replace(`src/content/${folder}/`, '')}
-			</button>
-		{/each}
+		<div class="cm-chips">
+			{#each filtered as it}
+				<button class="cm-item" class:active={active === it.rel} onclick={() => open(it.rel)} title={it.rel}>
+					{it.rel.replace(`src/content/${folder}/`, '')}
+				</button>
+			{/each}
+		</div>
 		{#if !filtered.length}<p class="muted">（空）</p>{/if}
 	</div>
 	<!-- side="left"：手柄在编辑器左侧，往左拖才是把编辑器拖宽（分界线始终跟手） -->

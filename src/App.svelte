@@ -66,6 +66,54 @@
 	/** 与 embed.html 的 controlsGutter 一致：右侧留一条放交互按钮的带子 */
 	const MENU_BAND = 40
 	let live2dIdleTimer: ReturnType<typeof setTimeout> | undefined
+	/** 移动端悬浮位置（屏幕坐标，左上角为原点）；拖完存 localStorage */
+	let live2dPos = $state<{ x: number; y: number } | null>(null)
+	const live2dPosKey = 'ff.live2d.pos'
+
+	// 拖动浮动看板娘：只有移动端悬浮才可拖（桌面端在侧栏格子内，拖了会乱布局）
+	let l2dDragging = $state(false)
+	let l2dDragState: { px: number; py: number; x: number; y: number; w: number; h: number } | null = null
+	function onL2dDown(e: PointerEvent): void {
+		if (!isMobile) return
+		const slot = (e.currentTarget as HTMLElement).parentElement as HTMLElement | null
+		if (!slot) return
+		l2dDragging = true
+		l2dDragState = {
+			px: e.clientX,
+			py: e.clientY,
+			x: live2dPos?.x ?? window.innerWidth - slot.offsetWidth - 6,
+			y: live2dPos?.y ?? window.innerHeight - slot.offsetHeight - 8,
+			w: slot.offsetWidth,
+			h: slot.offsetHeight
+		}
+		document.body.classList.add('ff-l2d-dragging')
+		window.addEventListener('pointermove', onL2dMove)
+		window.addEventListener('pointerup', onL2dUp)
+		window.addEventListener('pointercancel', onL2dUp)
+		e.preventDefault()
+	}
+	function onL2dMove(e: PointerEvent): void {
+		if (!l2dDragState) return
+		const x = Math.min(window.innerWidth - l2dDragState.w - 4, Math.max(4, l2dDragState.x + (e.clientX - l2dDragState.px)))
+		const y = Math.min(window.innerHeight - l2dDragState.h - 4, Math.max(4, l2dDragState.y + (e.clientY - l2dDragState.py)))
+		live2dPos = { x, y }
+	}
+	function onL2dUp(): void {
+		if (!l2dDragState) return
+		l2dDragging = false
+		l2dDragState = null
+		document.body.classList.remove('ff-l2d-dragging')
+		window.removeEventListener('pointermove', onL2dMove)
+		window.removeEventListener('pointerup', onL2dUp)
+		window.removeEventListener('pointercancel', onL2dUp)
+		if (live2dPos) {
+			try {
+				localStorage.setItem(live2dPosKey, JSON.stringify(live2dPos))
+			} catch {
+				/* 存不下就拉倒，不影响本次会话 */
+			}
+		}
+	}
 
 	const showLive2d = $derived(live2dEnabled && !live2dCollapsed)
 	const live2dSrc = $derived(`live2d/embed.html?s=${Math.round(live2dScale * 100) / 100}&x=0&y=0&hw=1`)
@@ -243,6 +291,16 @@
 
 	onMount(() => {
 		void boot()
+		// 读回上次拖动保存的看板娘位置
+		try {
+			const raw = localStorage.getItem(live2dPosKey)
+			if (raw) {
+				const p = JSON.parse(raw) as { x?: number; y?: number }
+				if (typeof p.x === 'number' && typeof p.y === 'number') live2dPos = { x: p.x, y: p.y }
+			}
+		} catch {
+			/* 坏缓存忽略 */
+		}
 		const mq = window.matchMedia('(max-width: 900px)')
 		isMobile = mq.matches
 		const onMq = (): void => {
@@ -293,9 +351,13 @@
 		class="live2d-slot"
 		class:floating
 		style={floating
-			? `width: ${mw}; height: max(2px, calc((${mw} - ${MENU_BAND}px) / ${live2dRatio} + 2px))`
+			? `${live2dPos ? `left: ${live2dPos.x}px; top: ${live2dPos.y}px;` : 'right: 6px; bottom: 8px;'} width: ${mw}; height: max(2px, calc((${mw} - ${MENU_BAND}px) / ${live2dRatio} + 2px))`
 			: `--slot-w: max(1px, calc(100cqw * ${live2dScale})); width: var(--slot-w); height: max(2px, calc((var(--slot-w) - ${MENU_BAND}px) / ${live2dRatio} + 2px))`}
 	>
+		{#if floating}
+			<!-- 拖动把手：浮动时显示在容器顶部，触摸/鼠标拖住可移动看板娘 -->
+			<div class="live2d-handle" onpointerdown={onL2dDown} aria-label="拖动看板娘位置" role="button" tabindex="0"></div>
+		{/if}
 		<iframe bind:this={live2dFrame} src={live2dSrc} title="流萤看板娘" onload={pokeLive2d}></iframe>
 		<div class="live2d-above" style="left: calc((100% - {MENU_BAND}px) / 2); width: max(1px, calc(100% - {MENU_BAND}px))">
 			{#if live2dSay}
@@ -474,6 +536,42 @@
 		margin: 0;
 		--l2d-mw: clamp(120px, 40vw, 180px);
 		filter: drop-shadow(0 6px 16px rgba(12, 28, 26, 0.18));
+		touch-action: none;
+	}
+	/* 拖动把手：浮动容器左上角一个小圆点，抓它就能拖动看板娘（触摸友好，不挡模型） */
+	.live2d-handle {
+		position: absolute;
+		left: -6px;
+		top: -6px;
+		width: 26px;
+		height: 26px;
+		z-index: 3;
+		cursor: grab;
+		touch-action: none;
+		-webkit-user-select: none;
+		user-select: none;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		border-radius: 50%;
+		background: rgba(255, 255, 255, 0.85);
+		border: 1px solid var(--line);
+		box-shadow: 0 2px 8px rgba(12, 28, 26, 0.15);
+		transition: background 0.15s, transform 0.15s;
+	}
+	.live2d-handle::before {
+		content: '⠿';
+		color: rgba(13, 110, 100, 0.6);
+		font-size: 13px;
+		line-height: 1;
+		pointer-events: none;
+	}
+	.live2d-handle:active {
+		background: var(--accent-soft);
+		transform: scale(1.1);
+	}
+	body.ff-dragging .live2d-handle {
+		cursor: grabbing;
 	}
 	.live2d-above {
 		position: absolute;

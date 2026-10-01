@@ -3,6 +3,7 @@
 	import ContentManager from '../components/ContentManager.svelte'
 	import type { ConfigReadResult } from '../lib/api'
 	import { errMsg } from '../lib/err'
+	import { confirmDanger } from '../lib/confirm.svelte'
 
 	let tab = $state<'remote' | 'local'>('remote')
 	let memosUrl = $state('')
@@ -12,29 +13,40 @@
 	let localKey = $state(0)
 	let refreshing = $state(false)
 
-	// 内嵌网页的加载状态（只能区分「加载中 / 已加载」：
-	// iframe 的 onerror 对 HTTP 错误不可靠，拿不到错误码，见 docs/参数说明.md）
-	let wvEl = $state<HTMLElement | null>(null)
+	// ===== 直接发布（Memos API，token 在 CF 环境变量，前端不接触） =====
+	interface MemoItem {
+		id: string
+		content: string
+		createTime: string
+		visibility: string
+		pinned: boolean
+		tags: string[]
+	}
+	let memos = $state<MemoItem[]>([])
+	let memosLoading = $state(false)
+	let composing = $state('')
+	let visibility = $state<'PUBLIC' | 'PROTECTED' | 'PRIVATE'>('PUBLIC')
+	let publishing = $state(false)
+	/** 发布成功后自动滚动到最新一条 */
+	let memoListEl = $state<HTMLElement | null>(null)
+	/** 站点预览 iframe：默认折叠，点开才加载（省流量，也避免手机端白屏） */
+	let previewOpen = $state(false)
+	let wvEl = $state<HTMLIFrameElement | null>(null)
 	let wvState = $state<'idle' | 'loading' | 'loaded'>('idle')
 
 	const notify = getContext<(m: string, ok?: boolean) => void>('notify')
 
-	/** 地址变化时把内嵌页面标成「加载中」；真正完成由 iframe 的 onload 给出 */
-	$effect(() => {
-		void memosUrl
-		if (!memosUrl) return
-		wvState = 'loading'
-	})
-
-	function reloadWebview(): void {
-		const el = wvEl as HTMLIFrameElement | null
-		wvState = 'loading'
-		// iframe 没有 reload()：重新赋一次 src 才会真正重新加载
-		if (el) el.src = memosUrl
+	const VIS_LABEL: Record<string, string> = {
+		PUBLIC: '公开',
+		PROTECTED: '保护',
+		PRIVATE: '私密'
 	}
 
-	// 默认 Tab 跟着博客配置走：开了 Memos 就默认远端，否则本地
-	// （只在首次加载时切换 Tab；点刷新时保留用户当前选的页签）
+	function visLabel(v: string): string {
+		return VIS_LABEL[v] ?? v
+	}
+
+	/** 只读主题配置里的 memos.apiUrl / enable；拿不到就按「没有远端」处理 */
 	async function loadConfig(applyDefaultTab = false): Promise<void> {
 		try {
 			const res: ConfigReadResult = await window.api.configRead({
@@ -58,18 +70,61 @@
 		}
 	}
 
+	/** 拉最近动态列表 */
+	async function loadMemos(): Promise<void> {
+		memosLoading = true
+		try {
+			memos = await window.api.memosList(20)
+		} catch (e) {
+			notify(errMsg(e), false)
+		} finally {
+			memosLoading = false
+		}
+	}
+
+	/** 发布：成功就清空输入框、刷新列表、滚动到最新一条 */
+	async function publishMemo(): Promise<void> {
+		const content = composing.trim()
+		if (!content || publishing) return
+		publishing = true
+		try {
+			const r = await window.api.memosPublish(content, visibility)
+			notify('已发布到 Memos')
+			composing = ''
+			await loadMemos()
+			if (r.id && memoListEl) {
+				memoListEl.scrollTop = 0
+			}
+		} catch (e) {
+			notify(errMsg(e), false)
+		} finally {
+			publishing = false
+		}
+	}
+
+	async function deleteMemo(m: MemoItem): Promise<void> {
+		if (!(await confirmDanger(`删除这条动态？`, m.content.slice(0, 60), 'Memos 上的这条会被删除，不可恢复。'))) return
+		try {
+			await window.api.memosDelete(m.id)
+			notify('已删除')
+			await loadMemos()
+		} catch (e) {
+			notify(errMsg(e), false)
+		}
+	}
+
 	onMount(async () => {
 		await loadConfig(true)
+		if (tab === 'remote') await loadMemos()
 	})
 
-	/**
-	 * 刷新：重新读主题的动态配置（Memos 地址 / 是否启用），重挂本地文件列表。
-	 */
+	/** 刷新：重新读主题的动态配置（Memos 地址 / 是否启用），重挂本地文件列表 */
 	async function refreshAll(): Promise<void> {
 		if (refreshing) return
 		refreshing = true
 		try {
 			await loadConfig()
+			if (tab === 'remote') await loadMemos()
 			localKey += 1
 			notify('已刷新：动态配置与本地文件列表都已重新同步')
 		} finally {
@@ -77,6 +132,23 @@
 		}
 	}
 
+	function reloadWebview(): void {
+		const el = wvEl
+		wvState = 'loading'
+		if (el) el.src = memosUrl
+	}
+
+	function openPreview(): void {
+		previewOpen = true
+		wvState = 'loading'
+	}
+
+	function timeStr(t: string): string {
+		const d = new Date(t)
+		if (isNaN(d.getTime())) return t
+		const p = (n: number): string => String(n).padStart(2, '0')
+		return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+	}
 </script>
 
 <div class="dyn-page">
@@ -103,40 +175,93 @@
 	</div>
 
 	{#if tab === 'remote'}
-		{#if memosUrl}
-			<div class="card web-card" data-ff-block="dynamics/web">
+		<!-- 远端发布：原生发布框（不再只靠 iframe 嵌入 Memos 网页） -->
+		<div class="dyn-remote">
+			<div class="card dyn-compose" data-ff-block="dynamics/compose">
 				<div class="row" style="justify-content:space-between; margin-bottom:8px">
-					<code style="font-size:12.5px">{memosUrl}</code>
-					<div class="row" style="gap:8px">
-						{#if wvState === 'loading'}<span class="muted">加载中…</span>{/if}
-						{#if wvState === 'loaded'}<span class="muted">已加载</span>{/if}
-						<button class="btn small" onclick={reloadWebview}>↻ 重新加载</button>
-						<button class="btn small" onclick={() => window.api.openExternal(memosUrl)}>↗ 在浏览器打开</button>
+					<b>直接发布</b>
+					<span class="muted">发布到 Memos，网站实时可见</span>
+				</div>
+				<textarea
+					class="code dyn-compose-input"
+					rows="3"
+					placeholder="写点什么…（支持 Markdown）"
+					bind:value={composing}
+					onkeydown={(e) => {
+						if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') void publishMemo()
+					}}
+				></textarea>
+				<div class="row" style="justify-content:space-between; margin-top:8px">
+					<div class="row" style="gap:6px">
+						<label class="row" style="gap:4px">
+							<select bind:value={visibility} style="width:auto">
+								<option value="PUBLIC">公开</option>
+								<option value="PROTECTED">保护</option>
+								<option value="PRIVATE">私密</option>
+							</select>
+						</label>
+					</div>
+					<button class="btn primary" onclick={publishMemo} disabled={publishing || !composing.trim()}>
+						{publishing ? '发布中…' : '发布'}
+					</button>
+				</div>
+			</div>
+
+			<div class="card dyn-list" data-ff-block="dynamics/list" bind:this={memoListEl}>
+				<div class="row" style="justify-content:space-between; margin-bottom:8px">
+					<b>最近动态</b>
+					<div class="row" style="gap:6px">
+						{#if memosLoading}<span class="muted">加载中…</span>{/if}
+						<button class="btn small" onclick={loadMemos} disabled={memosLoading}>↻</button>
 					</div>
 				</div>
-				<!-- 直接在窗口内以网页方式加载远端 Memos（不另开窗口）。
-				     代价是：若该站点设了 X-Frame-Options / frame-ancestors 会被拒绝嵌入而白屏，
-				     这时用「↗ 在浏览器打开」即可。 -->
-				<iframe
-					bind:this={wvEl}
-					src={memosUrl}
-					title="Memos"
-					onload={() => {
-						wvState = 'loaded'
-					}}
-				></iframe>
-				<p class="hint" style="margin:8px 0 0">首次使用请在页面里登录 Memos；登录状态会被记住。在这里发的动态网站实时可见。</p>
+				{#if !memosLoading && !memos.length}
+					<p class="muted">还没有动态。用上面的发布框发第一条吧。</p>
+				{:else}
+					{#each memos as m (m.id)}
+						<div class="dyn-item">
+							<div class="dyn-item-body">{m.content}</div>
+							<div class="row" style="justify-content:space-between; gap:6px">
+								<div class="row" style="gap:6px">
+									<span class="tag">{visLabel(m.visibility)}</span>
+									{#if m.pinned}<span class="tag">📌</span>{/if}
+									<span class="muted">{timeStr(m.createTime)}</span>
+								</div>
+								<button class="btn small danger" onclick={() => deleteMemo(m)} disabled={publishing}>删除</button>
+							</div>
+						</div>
+					{/each}
+				{/if}
 			</div>
-		{:else}
-			<div class="card" style="background: var(--warn-bg); border-color: #f0dcb4" data-ff-block="dynamics/no-remote">
-				<b>主题配置里没读到远端动态地址</b>
-				<p class="muted">
-					本页在加载项目时会直接读主题的 <code>src/config/dynamicConfig.ts</code> 里的
-					<code>memos.apiUrl</code>，不需要再去配置中心单独设置。读不到一般是这个文件不存在、
-					里面没有 <code>memos</code> 字段，或者当前绑定的项目不对。
-				</p>
-			</div>
-		{/if}
+
+			{#if memosUrl}
+				<!-- 站点预览：默认折叠，点开才加载 iframe（避免手机端整屏白/卡） -->
+				<div class="card dyn-preview" data-ff-block="dynamics/preview">
+					<button class="row" style="justify-content:space-between; width:100%; background:none; border:none; cursor:pointer; padding:0" onclick={() => (previewOpen ? (previewOpen = false) : openPreview())}>
+						<b>站点预览</b>
+						<span class="muted">{previewOpen ? '收起 ▲' : '展开 ▼'}</span>
+					</button>
+					{#if previewOpen}
+						<div class="row" style="justify-content:space-between; margin:10px 0 8px">
+							<code style="font-size:12.5px">{memosUrl}</code>
+							<div class="row" style="gap:8px">
+								{#if wvState === 'loading'}<span class="muted">加载中…</span>{/if}
+								<button class="btn small" onclick={reloadWebview}>↻ 重新加载</button>
+								<button class="btn small" onclick={() => window.api.openExternal(memosUrl)}>↗ 在浏览器打开</button>
+							</div>
+						</div>
+						<iframe
+							bind:this={wvEl}
+							src={memosUrl}
+							title="Memos 站点预览"
+							onload={() => {
+								wvState = 'loaded'
+							}}
+						></iframe>
+					{/if}
+				</div>
+			{/if}
+		</div>
 	{:else}
 		<!-- 本地发布：**一张卡**，左边目录、右边编辑 —— 与「文章管理 / 项目展示」同一套 ContentManager。
 		     这里以前是上下两张卡（「新建本地动态」+「本地动态文件」），两套编辑框、
@@ -177,13 +302,59 @@
 	.dyn-head h2 {
 		margin: 0;
 	}
-	.web-card {
+	.dyn-remote {
 		flex: 1;
-		min-height: 320px;
+		min-height: 0;
 		display: flex;
 		flex-direction: column;
-		overflow: hidden;
+		gap: 12px;
+		overflow: auto;
 		box-sizing: border-box;
+	}
+	.dyn-compose {
+		flex-shrink: 0;
+	}
+	.dyn-compose-input {
+		min-height: 84px;
+		resize: vertical;
+	}
+	.dyn-list {
+		flex: 1;
+		min-height: 120px;
+		overflow: auto;
+		display: flex;
+		flex-direction: column;
+	}
+	.dyn-list > :not(.row) {
+		flex-shrink: 0;
+	}
+	.dyn-item {
+		border: 1px solid var(--line);
+		border-radius: 10px;
+		padding: 8px 12px;
+		margin-bottom: 8px;
+		background: #f8fdfb;
+	}
+	.dyn-item-body {
+		white-space: pre-wrap;
+		word-break: break-word;
+		font-size: 13.5px;
+		line-height: 1.6;
+		margin-bottom: 6px;
+		max-height: 120px;
+		overflow: hidden;
+	}
+	.dyn-preview {
+		flex-shrink: 0;
+	}
+	.dyn-preview iframe {
+		flex: 1;
+		width: 100%;
+		height: 52vh;
+		min-height: 0;
+		border: 1px solid var(--line);
+		border-radius: 8px;
+		background: #fff;
 	}
 	/* 本地发布：这一张卡就是「左目录 + 右编辑」，给它一个明确高度
 	   （内嵌的 ContentManager 自己负责两栏与分隔条） */
@@ -196,13 +367,5 @@
 	}
 	.dyn-files :global(.cm-page) {
 		height: 100%;
-	}
-	iframe {
-		flex: 1;
-		width: 100%;
-		min-height: 0;
-		border: 1px solid var(--line);
-		border-radius: 8px;
-		background: #fff;
 	}
 </style>

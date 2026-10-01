@@ -183,6 +183,10 @@ export interface WindowApiSubset {
 	/** D1 site_config 键值配置（登录后可用） */
 	configGet: (key: string) => Promise<string | null>
 	configSet: (key: string, value: string) => Promise<void>
+	/** Memos：列表 / 发布 / 删除（后端代理，token 在 CF 环境变量里） */
+	memosList: (limit?: number) => Promise<{ id: string; content: string; createTime: string; visibility: string; pinned: boolean; tags: string[] }[]>
+	memosPublish: (content: string, visibility?: 'PUBLIC' | 'PROTECTED' | 'PRIVATE') => Promise<{ id: string }>
+	memosDelete: (id: string) => Promise<void>
 }
 
 // oauth 回跳收 token；成功就剥掉 query
@@ -475,6 +479,19 @@ export function installApi(): void {
 		},
 		configSet: async (key, value) => {
 			await post<{ message: string }>('/config', { key, value })
+		},
+
+		// ---------- Memos（后端代理，token 在 CF 环境变量） ----------
+		memosList: async (limit) => {
+			const r = await get<{ memos: Array<{ id: string; content: string; createTime: string; visibility: string; pinned: boolean; tags: string[] }> }>(`/memos?limit=${limit ?? 20}`)
+			return r.memos
+		},
+		memosPublish: async (content, visibility) => {
+			const r = await post<{ message: string; id: string }>('/memos', { content, visibility: visibility ?? 'PUBLIC' })
+			return { id: r.id }
+		},
+		memosDelete: async (id) => {
+			await del(`/memos/${encodeURIComponent(id)}`)
 		}
 	}
 }

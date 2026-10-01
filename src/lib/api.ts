@@ -326,6 +326,12 @@ export function installApi(): void {
 				}>
 			}>(`/collections/${encodeURIComponent(name)}/items`)
 			if (!configsCache) await configs().catch(() => undefined) // 预热，fileWrite 等要用
+			// 后台旧版本曾把缺失的 date 字段写成字符串 "undefined"（见后端 toYamlDate 修复）。
+			// 那种脏值在列表里表现为「更新 undefined」，这里统一洗成空串。
+			const cleanDate = (s: string | undefined): string => {
+				const t = (s ?? '').trim()
+				return t === 'undefined' || t === 'null' ? '' : t
+			}
 			return r.items.map((it) => ({
 				rel: it.path,
 				// 只有 date，没有 published 的旧文章（以及旧后端）仍能得到正确的排序时间
@@ -334,9 +340,9 @@ export function installApi(): void {
 				// 旧后端（没部署这版 collections.ts）不返回这些字段时的兜底
 				title: it.title ?? it.slug,
 				draft: !!it.draft,
-				date: it.date ?? '',
-				published: it.published ?? it.date ?? '',
-				updated: it.updated ?? '',
+				date: cleanDate(it.date),
+				published: cleanDate(it.published) || cleanDate(it.date),
+				updated: cleanDate(it.updated),
 				category: it.category ?? '',
 				tags: Array.isArray(it.tags) ? it.tags : [],
 				image: it.image ?? '',

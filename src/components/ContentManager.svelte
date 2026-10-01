@@ -106,12 +106,35 @@
 	 */
 	let dynPublished = $state('')
 
+	/**
+	 * 拉文件列表。
+	 *
+	 * ⚠️ 这一步很贵：后端为了拿标题/分类/标签，要把**每个**文件的 frontmatter 解析一遍，
+	 * 成本是 `1 + N` 次 GitHub API 请求（1 次 Tree + N 次读文件，并发 8）。
+	 * 而任何写操作都会让后端那份 30s 列表缓存失效 —— 所以「新建完自动刷新列表」
+	 * 恰恰是最贵的一次：新建只花 1 次写入，却要再等 N 次读取才能进编辑器。
+	 *
+	 * 所以写操作之后**不再同步等它**：先把已知的那条本地插进列表让界面立刻可用，
+	 * 列表的全量刷新丢到后台慢慢跑（见 reloadInBackground）。
+	 */
 	async function load(): Promise<void> {
 		try {
 			items = await window.api.contentList(folder)
 		} catch (e) {
 			notify(errMsg(e), false)
 		}
+	}
+
+	/** 后台全量刷新列表：不阻塞界面，失败也只在有旧数据时提示一次 */
+	function reloadInBackground(): void {
+		void window.api
+			.contentList(folder)
+			.then((list) => {
+				items = list
+			})
+			.catch((e) => {
+				if (items.length) notify(`列表后台刷新失败：${errMsg(e)}`, false)
+			})
 	}
 	$effect(() => {
 		void load()
@@ -203,6 +226,13 @@
 		return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
 	}
 
+	/** 今天的 `YYYY-MM-DD`：给本地插入的新条目当日期，让它排到最前面 */
+	function todayStr(): string {
+		const d = new Date()
+		const p = (n: number): string => String(n).padStart(2, '0')
+		return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+	}
+
 	/**
 	 * 确保当前编辑的动态已经落盘，返回它的项目内相对路径。
 	 *
@@ -223,7 +253,7 @@
 		})
 		draftRel = rel
 		// 新文件已经落盘：把列表重新列一遍，让这条动态立刻出现在左侧
-		await load()
+		reloadInBackground()
 		return rel
 	}
 
@@ -243,7 +273,7 @@
 				dirty = false
 				parseDynFrontmatter(text)
 				notify('动态已保存并推送（云端构建后生效）！')
-				await load()
+				reloadInBackground()
 				return
 			}
 			await window.api.fileWrite(active, text)
@@ -272,7 +302,10 @@
 			const rel = await window.api.contentRename(active, ns)
 			showRename = false
 			renameTo = ''
-			await load()
+			// 改名后 rel 变了：本地把这一条的路径改掉，列表立刻正确
+			items = items.map((i) => (i.rel === active ? { ...i, rel, slug: ns.replace(/^.*\//, '').replace(/\.mdx?$/, '') } : i))
+			active = rel
+			reloadInBackground()
 			await open(rel)
 			notify(`已改名为 ${ns}`)
 		} catch (e) {
@@ -306,11 +339,14 @@
 		)
 			return
 		try {
-			const moved = await window.api.fileDelete(active)
+			// 先本地摘掉，界面立刻反映删除；全量刷新丢后台（同样理由：那一次刷新很贵）
+			const removed = active
+			const moved = await window.api.fileDelete(removed)
 			active = ''
 			text = ''
 			dirty = false
-			await load()
+			items = items.filter((i) => i.rel !== removed)
+			reloadInBackground()
 			notify(
 				moved.length > 1
 					? `已移入回收站（共 ${moved.length} 项，含附件目录）；可在「回收站」页恢复`
@@ -362,7 +398,7 @@
 					pinned: false,
 					location: ''
 				})
-				await load()
+				reloadInBackground()
 				await open(rel)
 				if (isNarrow) screen = 'edit'
 				notify('已新建一条动态，写完记得保存')
@@ -384,10 +420,21 @@
 			showNew = false
 			newTitle = ''
 			newSlug = ''
-			await load()
+			// ⚠️ 不要再 `await load()`：那一次列表刷新要让后端重解析**所有**文章的
+			// frontmatter（1 + N 次 GitHub 请求，写操作刚把缓存打掉了），
+			// 新建明明只花了一次写入，却要再等 N 次读取才进编辑器 —— 这就是「新建很慢」。
+			// 新条目是我们自己建的、字段全知道，先本地插到最前面让界面立刻可用；
+			// 全量刷新丢后台跑，回来再覆盖（保持顺序/字段与仓库一致）。
+			if (!items.some((i) => i.rel === rel)) {
+				items = [
+					{ rel, mtimeMs: Date.now(), slug, title, draft: false, date: todayStr(), category: '', tags: [], image: '', description: '' },
+					...items
+				]
+			}
 			await open(rel)
 			// 窄屏是「列表屏 / 编辑屏」两屏：新建完直接落到编辑屏，别让人再点一次
 			if (isNarrow) screen = 'edit'
+			reloadInBackground()
 			notify(isNarrow ? '已创建，直接开始写；标题/文件名可在编辑页用「改名」改' : '已创建，写完记得「发布上线」推送')
 		} catch (e) {
 			notify(errMsg(e), false)
@@ -406,7 +453,12 @@
 		busy = true
 		try {
 			const rel = await window.api.contentClone(active)
-			await load()
+			// 克隆出的副本除路径外与原件一致（title 多了「（副本）」），直接复制本地那条
+			const src = items.find((i) => i.rel === active)
+			if (src && !items.some((i) => i.rel === rel)) {
+				items = [{ ...src, rel }, ...items]
+			}
+			reloadInBackground()
 			await open(rel)
 			notify(`已克隆为 ${rel.replace(`src/content/${folder}/`, '')}（标题已加「（副本）」），可以接着改这一份`)
 		} catch (e) {
@@ -505,13 +557,26 @@
 	}
 
 	/**
-	 * 列表过滤：搜索词要能命中卡片上**显示出来的每一个词** —— 标题、分类、每个标签、
-	 * 文件名。只搜文件名的话，「按标签筛」这种最自然的用法反而搜不到。
+	 * 列表：**按时间倒序**（新的在前），然后过滤。
+	 *
+	 * 为什么前端还要排一次：后端也排，但它的排序键是 `date || slug` ——
+	 * 拿**日期字符串和 slug 混着比**（`localeCompare('2026-07-21','hello-world')`
+	 * 的结果没有意义），所以缺日期的条目会插到任意位置。这里统一成：
+	 *   有日期的按日期倒序 → 没日期的按 mtimeMs 倒序 → 都靠 mtimeMs
+	 * 排序在**过滤之前**做，这样「搜出来的结果」本身也是按时间排的。
 	 */
+	const sorted = $derived.by(() =>
+		[...items].sort((a, b) => {
+			if (a.date && b.date) return b.date.localeCompare(a.date)
+			if (a.date) return -1
+			if (b.date) return 1
+			return b.mtimeMs - a.mtimeMs
+		})
+	)
 	const filtered = $derived.by(() => {
 		const q = filter.trim().toLowerCase()
-		if (!q) return items
-		return items.filter((i) =>
+		if (!q) return sorted
+		return sorted.filter((i) =>
 			[i.rel, i.title, i.category, i.description, ...i.tags].some((s) => s && s.toLowerCase().includes(q))
 		)
 	})
@@ -616,9 +681,6 @@
 			onclick={() => (wide ? open(it.rel) : openOn(it.rel))}
 			title={it.rel}
 		>
-			{#if it.image}
-				<img class="cm-card-cover" src={it.image} alt="" loading="lazy" />
-			{/if}
 			<div class="cm-card-main">
 				<div class="cm-card-title">
 					{it.title || it.rel.replace(`src/content/${folder}/`, '').replace(/\.mdx?$/, '')}
@@ -635,7 +697,6 @@
 						{#if it.tags.length > 4}<span class="cm-chip">+{it.tags.length - 4}</span>{/if}
 					</div>
 				{/if}
-				{#if it.description}<div class="cm-card-desc">{it.description}</div>{/if}
 			</div>
 		</button>
 	{/each}
@@ -908,16 +969,8 @@
 		border-color: var(--accent);
 		background: var(--accent-soft);
 	}
-	.cm-card-cover {
-		display: block;
-		width: 100%;
-		/* 16:9 固定比例：不同图高矮不一会让列表高度乱跳 */
-		height: 120px;
-		object-fit: cover;
-		background: #eef5f3;
-	}
 	.cm-card-main {
-		padding: 9px 11px 10px;
+		padding: 10px 12px 11px;
 	}
 	.cm-card-title {
 		font-size: 14px;

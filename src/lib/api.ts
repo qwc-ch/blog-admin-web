@@ -168,7 +168,7 @@ export interface WindowApiSubset {
 	openExternal: (url: string) => Promise<void>
 	plantumlUrl: (text: string) => Promise<string>
 	assetImport: (target: string) => Promise<string[]>
-	publishInfo: () => Promise<{ owner: string; repo: string; branch: string; blogUrl: string | null; commits: { sha: string; message: string; date: string; author: string }[] }>
+	publishInfo: () => Promise<{ owner: string; repo: string; branch: string; blogUrl: string | null; commits: { sha: string; message: string; date: string; author: string }[]; error?: string }>
 	collectionsList: () => Promise<{ name: string; label: string; path: string; filename: string }[]>
 	itemLog: (rel: string) => Promise<{ sha: string; message: string; date: string }[]>
 	listImages: () => Promise<{ key: string; size: number; url: string }[]>

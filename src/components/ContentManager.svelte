@@ -364,14 +364,22 @@
 				})
 				await load()
 				await open(rel)
+				if (isNarrow) screen = 'edit'
 				notify('已新建一条动态，写完记得保存')
 				return
 			}
+			// 窄屏：点「新建」**直接建一条占位内容并跳编辑页**，不再先弹标题/slug 表单。
+			// 原来那个表单要用户填两样东西才进编辑器，手机上多一屏往返；
+			// 而标题写错也能在编辑器里用「✏️ 改名」改（后端原子提交，连正文图片引用一起改）。
+			// slug 先用带时间戳的默认值，和动态一致地保证唯一。
+			const placeholder = `untitled-${Date.now().toString(36)}`
+			const title = newTitle.trim() || '未命名'
+			const slug = newSlug.trim() || (isNarrow ? placeholder : await makeSlug(newTitle || 'untitled'))
 			const rel = await window.api.contentCreate({
 				folder,
 				kind: createKind,
-				title: newTitle || '未命名',
-				slug: newSlug.trim() || (await makeSlug(newTitle || 'untitled'))
+				title,
+				slug
 			})
 			showNew = false
 			newTitle = ''
@@ -380,7 +388,7 @@
 			await open(rel)
 			// 窄屏是「列表屏 / 编辑屏」两屏：新建完直接落到编辑屏，别让人再点一次
 			if (isNarrow) screen = 'edit'
-			notify('已创建，写完记得「发布上线」推送')
+			notify(isNarrow ? '已创建，直接开始写；标题/文件名可在编辑页用「改名」改' : '已创建，写完记得「发布上线」推送')
 		} catch (e) {
 			notify(errMsg(e), false)
 		} finally {
@@ -496,7 +504,17 @@
 		}
 	}
 
-	const filtered = $derived(items.filter((i) => !filter || i.rel.toLowerCase().includes(filter.toLowerCase())))
+	/**
+	 * 列表过滤：搜索词要能命中卡片上**显示出来的每一个词** —— 标题、分类、每个标签、
+	 * 文件名。只搜文件名的话，「按标签筛」这种最自然的用法反而搜不到。
+	 */
+	const filtered = $derived.by(() => {
+		const q = filter.trim().toLowerCase()
+		if (!q) return items
+		return items.filter((i) =>
+			[i.rel, i.title, i.category, i.description, ...i.tags].some((s) => s && s.toLowerCase().includes(q))
+		)
+	})
 
 	// ================= 移动端：列表页 ↔ 编辑页 整屏切换 =================
 	//
@@ -567,26 +585,6 @@
 {#if hint && !embedded}<p class="muted" style="margin-top:0">{hint}</p>{/if}
 {/if}
 
-<!-- 窄屏「新建」表单：列表屏点「＋ 新建」之后，整屏显示标题 / slug 表单 -->
-{#if isNarrow && screen === 'list' && showNew && canCreate && createKind !== 'dynamic'}
-	<div class="card cm-new">
-		<div class="row" style="justify-content:space-between">
-			<h3 style="margin:0">{createLabel}</h3>
-			<button class="btn small" onclick={() => (showNew = false)}>取消</button>
-		</div>
-		<div class="field">
-			<label class="flabel" for="cm-new-title">标题</label>
-			<input id="cm-new-title" placeholder="标题" bind:value={newTitle} oninput={async () => (newSlug = await makeSlug(newTitle))} />
-		</div>
-		<div class="field">
-			<label class="flabel" for="cm-new-slug">文件名 / slug</label>
-			<input id="cm-new-slug" placeholder="自动生成，可改" bind:value={newSlug} />
-			<p class="hint">标题中文会自动转拼音作为文件名和 slug。</p>
-		</div>
-		<button class="btn primary cm-block" onclick={create} disabled={busy}>创建并开始编辑</button>
-	</div>
-{/if}
-
 <!-- 三个视图模式里重复出现的两个块（编辑框 / 预览），抽成 snippet 保持一致 -->
 {#snippet editor()}
 	<textarea
@@ -601,6 +599,47 @@
 {/snippet}
 {#snippet preview()}
 	<MarkdownPreview content={text} rel={active} isMdx={active.toLowerCase().endsWith('.mdx')} />
+{/snippet}
+
+<!--
+	列表卡片：宽屏左栏与窄屏列表屏**共用同一份** markup，只有外层容器不同。
+	卡片显示标题 / 分类 / 标签 / 日期 / 摘要，后端没声明对应 fields 的集合自动少显示几行。
+
+	搜索要能搜到卡片上**显示出来的每一个词**（标题 / 分类 / 标签 / 文件名），
+	不然「按标签筛」这种最自然的用法反而搜不到 —— 见上面 filtered 的定义。
+-->
+{#snippet listCards(wide: boolean)}
+	{#each filtered as it (it.rel)}
+		<button
+			class="cm-card"
+			class:active={active === it.rel}
+			onclick={() => (wide ? open(it.rel) : openOn(it.rel))}
+			title={it.rel}
+		>
+			{#if it.image}
+				<img class="cm-card-cover" src={it.image} alt="" loading="lazy" />
+			{/if}
+			<div class="cm-card-main">
+				<div class="cm-card-title">
+					{it.title || it.rel.replace(`src/content/${folder}/`, '').replace(/\.mdx?$/, '')}
+				</div>
+				<div class="cm-card-meta">
+					{#if it.category}<span class="cm-chip cm-chip-cat">{it.category}</span>{/if}
+					{#if it.draft}<span class="cm-chip cm-chip-draft">草稿</span>{/if}
+					{#if it.date}<span class="cm-card-date">{it.date.slice(0, 10)}</span>{/if}
+					{#if active === it.rel && dirty}<span class="cm-chip cm-chip-draft">未保存</span>{/if}
+				</div>
+				{#if it.tags.length}
+					<div class="cm-card-tags">
+						{#each it.tags.slice(0, 4) as t}<span class="cm-chip">#{t}</span>{/each}
+						{#if it.tags.length > 4}<span class="cm-chip">+{it.tags.length - 4}</span>{/if}
+					</div>
+				{/if}
+				{#if it.description}<div class="cm-card-desc">{it.description}</div>{/if}
+			</div>
+		</button>
+	{/each}
+	{#if !filtered.length}<p class="muted cm-empty">没有匹配的内容</p>{/if}
 {/snippet}
 <!-- 编辑器卡片：宽屏的右栏与窄屏的整屏编辑页共用同一份，两边行为完全一致 -->
 {#snippet editorCard()}
@@ -719,38 +758,22 @@
 			<button class="btn small" onclick={refresh} disabled={refreshing} title="重新从磁盘同步文件列表">↻</button>
 		</div>
 		{#if canCreate}
-			<button
-				class="btn primary cm-block"
-				onclick={createKind === 'dynamic' ? create : () => (showNew = !showNew)}
-				disabled={busy}
-			>
+			<!-- 手机上点一下直接建好并跳编辑页（不再先弹标题/slug 表单，见 create 的说明） -->
+			<button class="btn primary cm-block" onclick={create} disabled={busy}>
 				＋ {createLabel}
 			</button>
 		{/if}
-		<input class="cm-msearch" placeholder="搜索文件…" bind:value={filter} />
+		<input class="cm-msearch" placeholder="搜索标题 / 分类 / 标签…" bind:value={filter} />
 		<div class="card cm-list cm-mlist">
-			{#each filtered as it}
-				<button class="cm-item" class:active={active === it.rel} onclick={() => openOn(it.rel)} title={it.rel}>
-					<span class="cm-item-name">{it.rel.replace(`src/content/${folder}/`, '')}</span>
-					{#if active === it.rel}<span class="cm-item-flag">{dirty ? '未保存' : '打开中'}</span>{/if}
-				</button>
-			{/each}
-			{#if !filtered.length}<p class="muted">（空）</p>{/if}
+			{@render listCards(false)}
 		</div>
 	{/if}
 {:else}
 <!-- ===== 宽屏：一页两栏（列表 + 编辑器） ===== -->
 <div class="cm-layout">
 	<div class="card cm-list">
-		<input placeholder="搜索文件…" bind:value={filter} style="margin-bottom:8px" />
-		<div class="cm-chips">
-			{#each filtered as it}
-				<button class="cm-item" class:active={active === it.rel} onclick={() => open(it.rel)} title={it.rel}>
-					{it.rel.replace(`src/content/${folder}/`, '')}
-				</button>
-			{/each}
-		</div>
-		{#if !filtered.length}<p class="muted">（空）</p>{/if}
+		<input placeholder="搜索标题 / 分类 / 标签…" bind:value={filter} style="margin-bottom:8px" />
+		{@render listCards(true)}
 	</div>
 	<!-- side="left"：手柄在编辑器左侧，往左拖才是把编辑器拖宽（分界线始终跟手） -->
 	<DragBar side="left" width={editorW} onresize={setEditorW} onfinish={persistEditorW} />
@@ -805,29 +828,6 @@
 		height: 100%;
 		overflow: auto;
 		box-sizing: border-box;
-	}
-	.cm-item {
-		display: block;
-		width: 100%;
-		text-align: left;
-		border: none;
-		background: transparent;
-		border-radius: 8px;
-		padding: 7px 10px;
-		font-size: 13px;
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		color: var(--text);
-	}
-	.cm-item:hover {
-		background: #f3f8f8;
-		color: var(--accent);
-	}
-	.cm-item.active {
-		background: var(--accent-soft);
-		color: var(--accent);
-		font-weight: 600;
 	}
 	.cm-editor {
 		/* 宽度由中间那条分隔条控制（width 内联）；min-width 是拖拽下界 */
@@ -884,6 +884,109 @@
 		border: none;
 	}
 
+	/* ===== 列表卡片（宽屏左栏与窄屏列表屏共用）=====
+	   以前列表是一条条文件名按钮，只能显示路径；后端把 frontmatter 的标题/分类/
+	   标签/日期/摘要带出来之后，这里才能做成能扫读的卡片。 */
+	.cm-card {
+		display: block;
+		width: 100%;
+		text-align: left;
+		border: 1px solid var(--line);
+		border-radius: 10px;
+		background: #fff;
+		padding: 0;
+		overflow: hidden;
+		margin-bottom: 8px;
+		color: var(--text);
+		transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+	}
+	.cm-card:hover {
+		border-color: var(--accent);
+		box-shadow: 0 2px 10px rgba(20, 184, 166, 0.16);
+	}
+	.cm-card.active {
+		border-color: var(--accent);
+		background: var(--accent-soft);
+	}
+	.cm-card-cover {
+		display: block;
+		width: 100%;
+		/* 16:9 固定比例：不同图高矮不一会让列表高度乱跳 */
+		height: 120px;
+		object-fit: cover;
+		background: #eef5f3;
+	}
+	.cm-card-main {
+		padding: 9px 11px 10px;
+	}
+	.cm-card-title {
+		font-size: 14px;
+		font-weight: 600;
+		line-height: 1.4;
+		color: var(--text);
+		/* 标题最多两行，超出省略 —— 列表高度才不会被一条长标题撑歪 */
+		display: -webkit-box;
+		-webkit-line-clamp: 2;
+		-webkit-box-orient: vertical;
+		overflow: hidden;
+	}
+	.cm-card.active .cm-card-title {
+		color: var(--accent-deep);
+	}
+	.cm-card-meta {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		flex-wrap: wrap;
+		margin-top: 5px;
+		font-size: 12px;
+		color: var(--muted);
+	}
+	.cm-card-date {
+		white-space: nowrap;
+	}
+	.cm-card-tags {
+		display: flex;
+		gap: 4px;
+		flex-wrap: wrap;
+		margin-top: 5px;
+	}
+	.cm-chip {
+		display: inline-block;
+		padding: 1px 7px;
+		border-radius: 99px;
+		background: #eef5f3;
+		color: var(--muted);
+		font-size: 11.5px;
+		white-space: nowrap;
+		max-width: 130px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.cm-chip-cat {
+		background: var(--accent-soft);
+		color: var(--accent-deep);
+		font-weight: 600;
+	}
+	.cm-chip-draft {
+		background: #fff3cd;
+		color: #8a6d3b;
+		font-weight: 600;
+	}
+	.cm-card-desc {
+		margin-top: 5px;
+		font-size: 12px;
+		line-height: 1.5;
+		color: var(--muted);
+		display: -webkit-box;
+		-webkit-line-clamp: 2;
+		-webkit-box-orient: vertical;
+		overflow: hidden;
+	}
+	.cm-empty {
+		margin: 10px 4px;
+	}
+
 	/* ===== 窄屏专属（这些类只在 isNarrow 时才渲染，见上面的两屏切换）===== */
 	/* 一行 40px 高的头：左边返回 / 标题，右边次要操作 */
 	.cm-mbar {
@@ -921,24 +1024,9 @@
 		min-height: 220px;
 		overflow: auto;
 	}
-	.cm-item-name {
-		flex: 1;
-		min-width: 0;
-		overflow: hidden;
-		text-overflow: ellipsis;
-	}
-	/* 窄屏的列表是一行一个文件（不是宽屏那种横向 chips），行高给到手指好按的大小 */
-	.cm-mlist .cm-item {
-		display: flex;
-		align-items: center;
-		padding: 12px 10px;
-		border-radius: 8px;
-	}
-	.cm-item-flag {
-		flex-shrink: 0;
-		margin-left: 8px;
-		font-size: 11px;
-		color: var(--accent-deep);
+	/* 手机上卡片是主要点击目标：留足上下内边距，别按错行 */
+	.cm-mlist .cm-card-main {
+		padding: 12px 12px 13px;
 	}
 	/* 编辑屏：编辑器占满剩下的高度，正文框随它一起长高 */
 	.cm-meditor {
@@ -951,8 +1039,5 @@
 		width: 100%;
 		min-width: 0;
 		height: auto;
-	}
-	.cm-new {
-		flex: 1;
 	}
 </style>

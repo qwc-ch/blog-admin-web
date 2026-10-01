@@ -307,9 +307,36 @@ export function installApi(): void {
 		// ---------- 内容 ----------
 		contentList: async (folder) => {
 			const name = await collectionByFolder(folder)
-			const r = await get<{ items: Array<{ slug: string; path: string; date: string }> }>(`/collections/${encodeURIComponent(name)}/items`)
+			// 后端已经把 frontmatter 解析好了（标题/日期/分类/标签/封面/摘要），
+			// 这里**原样带下来**：以前只取 rel + mtime，标题、分类、标签全被丢掉，
+			// 列表只能显示文件名，做不出卡片来。
+			const r = await get<{
+				items: Array<{
+					slug: string
+					path: string
+					title?: string
+					draft?: boolean
+					date?: string
+					category?: string
+					tags?: string[]
+					image?: string
+					description?: string
+				}>
+			}>(`/collections/${encodeURIComponent(name)}/items`)
 			if (!configsCache) await configs().catch(() => undefined) // 预热，fileWrite 等要用
-			return r.items.map((it) => ({ rel: it.path, mtimeMs: it.date ? Date.parse(it.date.replace(' ', 'T')) || 0 : 0 }))
+			return r.items.map((it) => ({
+				rel: it.path,
+				mtimeMs: it.date ? Date.parse(it.date.replace(' ', 'T')) || 0 : 0,
+				slug: it.slug,
+				// 旧后端（没部署这版 collections.ts）不返回这些字段时的兜底
+				title: it.title ?? it.slug,
+				draft: !!it.draft,
+				date: it.date ?? '',
+				category: it.category ?? '',
+				tags: Array.isArray(it.tags) ? it.tags : [],
+				image: it.image ?? '',
+				description: it.description ?? ''
+			}))
 		},
 		fileRead: async (rel) => {
 			const { name, slug } = await locateByRel(rel)

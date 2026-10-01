@@ -4,10 +4,31 @@
  * 避免两边各写一份接口后悄悄跑偏（字段漂移编译器不会报错）。
  */
 
-/** 内容文件（文章 / 项目 / 动态 / spec）：界面只用 rel 打开文件，列表按 mtimeMs 倒序 */
+/**
+ * 内容文件（文章 / 项目 / 动态 / spec）。
+ *
+ * rel 用来打开文件；其余字段是**列表卡片**要显示的元信息，由后端解析 frontmatter
+ * 时顺带带出（不额外发请求）。后端没声明对应 fields 时就是空值，界面据此隐藏该行。
+ */
 export interface ContentItem {
 	rel: string
 	mtimeMs: number
+	/** frontmatter 标题；缺省时后端回落成 slug */
+	title: string
+	/** 草稿标记 */
+	draft: boolean
+	/** 排序/显示日期（updated 优先，其次 published） */
+	date: string
+	/** 分类 */
+	category: string
+	/** 标签 */
+	tags: string[]
+	/** 封面图直链 */
+	image: string
+	/** 摘要 */
+	description: string
+	/** 条目 slug（文件名，不含目录与扩展名） */
+	slug: string
 }
 
 /** git status --porcelain 的结果；ok=false 时 error 是给用户看的原文 */

@@ -39,6 +39,25 @@
 
 	const notify = getContext<(m: string, ok?: boolean) => void>('notify')
 
+	// ===== 窄屏：整屏列表 ↔ 整屏表单 =====
+	//
+	// 原来窄屏是「列表 + 表单」上下堆在一页里，两边各占半屏（一屏 800px 高时每边只有
+	// 300 多像素，字段多的一屏根本点不完）。改成两屏：列表铺满整屏，点一个配置
+	// 才切到整屏表单页，左上角返回。宽屏仍是左列表 + 右表单两栏。
+	let isNarrow = $state(false)
+	let screen = $state<'list' | 'form'>('list')
+
+	$effect(() => {
+		const mq = window.matchMedia('(max-width: 900px)')
+		const sync = (): void => {
+			isNarrow = mq.matches
+			if (!mq.matches) screen = 'list'
+		}
+		sync()
+		mq.addEventListener('change', sync)
+		return () => mq.removeEventListener('change', sync)
+	})
+
 	const GROUP_ORDER = ['基础', '外观', '功能', '内容', '其他']
 	const registryByRel = new Map(CONFIG_REGISTRY.map((e) => [e.rel, e]))
 	const relToId = new Map(CONFIG_REGISTRY.map((e) => [e.rel, e.id]))
@@ -121,6 +140,8 @@
 				originalJson = JSON.stringify(res.exports)
 				activeExport = 0
 			}
+			// 窄屏点完直接进表单屏（列表屏只在没选中任何配置时显示）
+			if (isNarrow) screen = 'form'
 		} catch (e) {
 			notify(errMsg(e), false)
 		}
@@ -181,18 +202,10 @@
 </script>
 
 <div class="cc-page">
-<div class="row" style="justify-content:space-between; margin-bottom:14px">
-	<h2 style="margin:0">🎛️ 配置中心</h2>
-	<div class="row">
-		<input placeholder="搜索配置…" bind:value={search} style="max-width:200px" />
-		<button class="btn" onclick={refreshDiscovery}>🔄 重新扫描</button>
-	</div>
-</div>
-
-<div class="cc-layout">
-<div class="cc-list" style="width:{ccW}px">
+<!-- 配置项列表：窄屏整屏列表屏 / 宽屏左栏，两边共用同一段 -->
+{#snippet list()}
 	{#each groups as grp}
-		<div class="muted" style="margin:10px 4px 4px; font-weight:600">{grp}</div>
+		<div class="muted cc-group">{grp}</div>
 		{#each filtered.filter((e) => e.group === grp) as e (e.rel)}
 			<button class="cc-item" class:active={selectedRel === e.rel} onclick={() => open(e)}>
 				<div><b>{e.title}</b></div>
@@ -203,15 +216,14 @@
 	{#if !entries.length}
 		<p class="muted">未发现配置文件，请先绑定项目文件夹。</p>
 	{/if}
-</div>
+{/snippet}
 
-<DragBar side="right" width={ccW} onresize={setCcW} onfinish={persistCcW} />
-
-<div class="cc-editor">
+<!-- 表单：窄屏整屏表单屏 / 宽屏右栏，两边共用同一段 -->
+{#snippet form()}
 	{#if !selected}
 		<div class="card" data-ff-block="configs/empty"><p class="muted">从左侧选择一个配置文件开始编辑。所有改动保存即推送（自动构建发布后生效）。</p></div>
 	{:else}
-		<div class="row" style="justify-content:space-between; margin-bottom:10px">
+		<div class="row cc-editor-head">
 			<div class="row">
 				<h3 style="margin:0">{selected.title}</h3>
 				<span class="muted">{selected.rel}</span>
@@ -250,8 +262,50 @@
 			{/if}
 		</div>
 	{/if}
-</div>
-</div>
+{/snippet}
+
+{#if isNarrow}
+	<!-- 窄屏两屏：列表铺满整屏 → 点一个配置 → 表单铺满整屏（带返回） -->
+	{#if screen === 'form' && selected}
+		<div class="cc-mbar">
+			<button class="btn" onclick={() => (screen = 'list')}>← 配置列表</button>
+			<b>{selected.title}</b>
+			<button class="btn small" onclick={refreshDiscovery}>🔄</button>
+		</div>
+		<div class="cc-mform">
+			{@render form()}
+		</div>
+	{:else}
+		<div class="cc-mbar">
+			<b>🎛️ 配置中心</b>
+			<button class="btn small" onclick={refreshDiscovery}>🔄 重新扫描</button>
+		</div>
+		<input class="cc-msearch" placeholder="搜索配置…" bind:value={search} />
+		<div class="cc-mlist">
+			{@render list()}
+		</div>
+	{/if}
+{:else}
+	<div class="row" style="justify-content:space-between; margin-bottom:14px">
+		<h2 style="margin:0">🎛️ 配置中心</h2>
+		<div class="row">
+			<input placeholder="搜索配置…" bind:value={search} style="max-width:200px" />
+			<button class="btn" onclick={refreshDiscovery}>🔄 重新扫描</button>
+		</div>
+	</div>
+
+	<div class="cc-layout">
+		<div class="cc-list" style="width:{ccW}px">
+			{@render list()}
+		</div>
+
+		<DragBar side="right" width={ccW} onresize={setCcW} onfinish={persistCcW} />
+
+		<div class="cc-editor">
+			{@render form()}
+		</div>
+	</div>
+{/if}
 </div>
 
 <style>
@@ -309,6 +363,55 @@
 		flex-direction: column;
 	}
 	.cc-editor > .card {
+		flex: 1;
+		min-height: 0;
+		overflow: auto;
+	}
+	.cc-group {
+		margin: 10px 4px 4px;
+		font-weight: 600;
+	}
+	.cc-editor-head {
+		justify-content: space-between;
+		margin-bottom: 10px;
+	}
+
+	/* ===== 窄屏专属（只在 isNarrow 时渲染）：整屏列表 / 整屏表单 ===== */
+	.cc-mbar {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		flex-shrink: 0;
+		min-height: 40px;
+	}
+	.cc-mbar .btn {
+		flex-shrink: 0;
+	}
+	.cc-mbar b {
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		white-space: nowrap;
+		text-overflow: ellipsis;
+	}
+	.cc-msearch {
+		flex-shrink: 0;
+	}
+	.cc-mlist {
+		flex: 1;
+		min-height: 220px;
+		overflow: auto;
+	}
+	.cc-mlist .cc-item {
+		padding: 11px 12px;
+	}
+	.cc-mform {
+		flex: 1;
+		min-height: 0;
+		display: flex;
+		flex-direction: column;
+	}
+	.cc-mform > .card {
 		flex: 1;
 		min-height: 0;
 		overflow: auto;

@@ -116,6 +116,40 @@
 				document.body.classList.toggle('ff-adjust', on)
 			}
 
+			/**
+			 * 合成一次「点在模型上」（坐标 = iframe 内坐标，来自管理器的 ff-tap-at）。
+			 *
+			 * 在 canvas 上派发一对 pointerdown/pointerup：下面那段命中区桥接挂在 window
+			 * 捕获阶段，加载器自己的处理器挂在 canvas 上，两者都会收到 —— 于是
+			 * 「点刘海出墨镜、点左右侧发不同动作、没命中就随机」这套语义原样保留，
+			 * 管理器那边不需要重复实现一遍命中判定。
+			 *
+			 * 指针按下/抬起之间不插任何延时：桥接判定的是「位移 < 6px 且按住 < 600ms」，
+			 * 同步派发天然满足。
+			 */
+			function synthTap(x, y) {
+				var canvas = document.querySelector('canvas')
+				if (!canvas) return
+				var base = {
+					bubbles: true,
+					cancelable: true,
+					composed: true,
+					pointerId: 1,
+					pointerType: 'touch',
+					isPrimary: true,
+					button: 0,
+					buttons: 1,
+					clientX: x,
+					clientY: y
+				}
+				try {
+					canvas.dispatchEvent(new PointerEvent('pointerdown', base))
+					canvas.dispatchEvent(new PointerEvent('pointerup', Object.assign({}, base, { buttons: 0 })))
+				} catch (err) {
+					/* 没有 PointerEvent 构造器的老浏览器：放弃这次点击，模型照常显示 */
+				}
+			}
+
 			window.addEventListener('message', function (e) {
 				if (e.source !== window.parent) return
 				var d = e.data || {}
@@ -158,6 +192,15 @@
 					// 由加载器的快速跟随接手（iframe 内的那部分由加载器自己的 pointermove 收）
 					var lp = window.FireflyLive2D
 					if (l4ready() && typeof lp.focus === 'function') lp.focus(d.x, d.y)
+				} else if (d.type === 'ff-tap-at') {
+					// 「用户在模型上点了一下」，坐标是管理器换算好的 iframe 内坐标。
+					//
+					// 为什么要转发：移动端管理器为了支持长按拖动，在 iframe **上面**铺了一层
+					// 透明接压层（页面收不到 iframe 内部的指针事件），于是模型自己再也收不到
+					// 真实按压。这里把点击合成一对 pointerdown/pointerup 打在 canvas 上 ——
+					// 下面那段命中区桥接会照常判定（刘海 → 墨镜…），没命中专属区则放行给加载器，
+					// 由它走原来的兜底随机动作。整套互动语义因此与直接点模型完全一致。
+					synthTap(d.x, d.y)
 				} else if (d.type === 'ff-adjust') {
 					// 从调整模式退出（无论双击还是点按钮）都回报当前参数，确保保存
 					if (adjusting && !d.on) apply(true)

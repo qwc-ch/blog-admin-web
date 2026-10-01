@@ -378,6 +378,8 @@
 			newSlug = ''
 			await load()
 			await open(rel)
+			// 窄屏是「列表屏 / 编辑屏」两屏：新建完直接落到编辑屏，别让人再点一次
+			if (isNarrow) screen = 'edit'
 			notify('已创建，写完记得「发布上线」推送')
 		} catch (e) {
 			notify(errMsg(e), false)
@@ -495,9 +497,44 @@
 	}
 
 	const filtered = $derived(items.filter((i) => !filter || i.rel.toLowerCase().includes(filter.toLowerCase())))
+
+	// ================= 移动端：列表页 ↔ 编辑页 整屏切换 =================
+	//
+	// 窄屏（≤900px）下原来是「列表 chips + 编辑器」上下堆在一页里：两样都只占半屏，
+	// 列表要横着滚、编辑器被压成一条，写字很难受。改成两个整屏视图：
+	//   列表页：搜索 + 全部文件 + 「新建」按钮铺满整屏
+	//   编辑页：点开某篇 → 整屏编辑器（带返回按钮），编辑 / 分屏 / 预览都在这里
+	// 宽屏（桌面）保持原来的一页两栏，不受这个开关影响。
+	let isNarrow = $state(false)
+	let screen = $state<'list' | 'edit'>('list')
+
+	$effect(() => {
+		const mq = window.matchMedia('(max-width: 900px)')
+		const sync = (): void => {
+			isNarrow = mq.matches
+			// 回到宽屏时收回列表页：宽屏布局里没有「编辑页」这个概念
+			if (!mq.matches) screen = 'list'
+		}
+		sync()
+		mq.addEventListener('change', sync)
+		return () => mq.removeEventListener('change', sync)
+	})
+
+	/** 打开一篇：窄屏切到整屏编辑页，宽屏照旧左右两栏 */
+	async function openOn(rel: string): Promise<void> {
+		await open(rel)
+		if (isNarrow) screen = 'edit'
+	}
+
+	/** 编辑页左上角的返回：回列表页（正文还在，下次点开同一篇不会丢） */
+	function backToList(): void {
+		screen = 'list'
+	}
 </script>
 
 <div class="cm-page">
+<!-- 顶部工具行只给宽屏：窄屏的两屏各有自己的头（列表屏要一整块「新建」，编辑屏要「返回」） -->
+{#if !isNarrow}
 <div class="row" style="justify-content:space-between; margin-bottom:10px">
 	{#if embedded}
 		<div class="row">
@@ -528,6 +565,27 @@
 	</div>
 </div>
 {#if hint && !embedded}<p class="muted" style="margin-top:0">{hint}</p>{/if}
+{/if}
+
+<!-- 窄屏「新建」表单：列表屏点「＋ 新建」之后，整屏显示标题 / slug 表单 -->
+{#if isNarrow && screen === 'list' && showNew && canCreate && createKind !== 'dynamic'}
+	<div class="card cm-new">
+		<div class="row" style="justify-content:space-between">
+			<h3 style="margin:0">{createLabel}</h3>
+			<button class="btn small" onclick={() => (showNew = false)}>取消</button>
+		</div>
+		<div class="field">
+			<label class="flabel" for="cm-new-title">标题</label>
+			<input id="cm-new-title" placeholder="标题" bind:value={newTitle} oninput={async () => (newSlug = await makeSlug(newTitle))} />
+		</div>
+		<div class="field">
+			<label class="flabel" for="cm-new-slug">文件名 / slug</label>
+			<input id="cm-new-slug" placeholder="自动生成，可改" bind:value={newSlug} />
+			<p class="hint">标题中文会自动转拼音作为文件名和 slug。</p>
+		</div>
+		<button class="btn primary cm-block" onclick={create} disabled={busy}>创建并开始编辑</button>
+	</div>
+{/if}
 
 <!-- 三个视图模式里重复出现的两个块（编辑框 / 预览），抽成 snippet 保持一致 -->
 {#snippet editor()}
@@ -544,46 +602,9 @@
 {#snippet preview()}
 	<MarkdownPreview content={text} rel={active} isMdx={active.toLowerCase().endsWith('.mdx')} />
 {/snippet}
-
-{#if showRename && active}
-	<div class="card" style="margin-bottom:12px">
-		<h3>文件改名</h3>
-		<div class="row">
-			<input placeholder="新 slug（可含子路径，如 guide/new-name）" bind:value={renameTo} style="max-width:340px" />
-			<button class="btn primary" onclick={doRename} disabled={busy || !renameTo.trim()}>改名</button>
-			<button class="btn" onclick={() => (showRename = false)}>取消</button>
-		</div>
-		<p class="hint">目录式条目（{`{slug}`}/index.md）会同步改目录名与正文里的图片相对路径；这一次改动作为一个 git 提交。</p>
-	</div>
-{/if}
-
-{#if showNew && canCreate && createKind !== 'dynamic'}
-	<div class="card" style="margin-bottom:12px" data-ff-block="content/new">
-		<h3>{createLabel}</h3>
-		<div class="row">
-			<input placeholder="标题" bind:value={newTitle} style="max-width:300px" oninput={async () => (newSlug = await makeSlug(newTitle))} />
-			<input placeholder="文件名 / slug（自动生成，可改）" bind:value={newSlug} style="max-width:300px" />
-			<button class="btn primary" onclick={create} disabled={busy}>创建</button>
-		</div>
-		<p class="hint">标题中文会自动转拼音作为文件名和 slug（与博客 new-post 脚本行为一致）。</p>
-	</div>
-{/if}
-
-<div class="cm-layout">
-	<div class="card cm-list">
-		<input placeholder="搜索文件…" bind:value={filter} style="margin-bottom:8px" />
-		<div class="cm-chips">
-			{#each filtered as it}
-				<button class="cm-item" class:active={active === it.rel} onclick={() => open(it.rel)} title={it.rel}>
-					{it.rel.replace(`src/content/${folder}/`, '')}
-				</button>
-			{/each}
-		</div>
-		{#if !filtered.length}<p class="muted">（空）</p>{/if}
-	</div>
-	<!-- side="left"：手柄在编辑器左侧，往左拖才是把编辑器拖宽（分界线始终跟手） -->
-	<DragBar side="left" width={editorW} onresize={setEditorW} onfinish={persistEditorW} />
-	<div class="card cm-editor" style="width:{editorW}px">
+<!-- 编辑器卡片：宽屏的右栏与窄屏的整屏编辑页共用同一份，两边行为完全一致 -->
+{#snippet editorCard()}
+	<div class="card cm-editor" style={isNarrow ? '' : `width:${editorW}px`}>
 		{#if !active && !isDynamic}
 			<p class="muted">从左侧选择文件开始编辑；或导入/新建。</p>
 		{:else}
@@ -649,7 +670,93 @@
 			{/if}
 		{/if}
 	</div>
+{/snippet}
+
+{#if showRename && active}
+	<div class="card" style="margin-bottom:12px">
+		<h3>文件改名</h3>
+		<div class="row">
+			<input placeholder="新 slug（可含子路径，如 guide/new-name）" bind:value={renameTo} style="max-width:340px" />
+			<button class="btn primary" onclick={doRename} disabled={busy || !renameTo.trim()}>改名</button>
+			<button class="btn" onclick={() => (showRename = false)}>取消</button>
+		</div>
+		<p class="hint">目录式条目（{`{slug}`}/index.md）会同步改目录名与正文里的图片相对路径；这一次改动作为一个 git 提交。</p>
+	</div>
+{/if}
+
+{#if showNew && canCreate && createKind !== 'dynamic' && !isNarrow}
+	<div class="card" style="margin-bottom:12px" data-ff-block="content/new">
+		<h3>{createLabel}</h3>
+		<div class="row">
+			<input placeholder="标题" bind:value={newTitle} style="max-width:300px" oninput={async () => (newSlug = await makeSlug(newTitle))} />
+			<input placeholder="文件名 / slug（自动生成，可改）" bind:value={newSlug} style="max-width:300px" />
+			<button class="btn primary" onclick={create} disabled={busy}>创建</button>
+		</div>
+		<p class="hint">标题中文会自动转拼音作为文件名和 slug（与博客 new-post 脚本行为一致）。</p>
+	</div>
+{/if}
+
+<!-- ===== 窄屏：整屏列表 ↔ 整屏编辑器 ===== -->
+{#if isNarrow}
+	{#if screen === 'edit'}
+		<!-- 编辑屏：左上角返回列表，下面整屏都是编辑器（编辑 / 分屏 / 预览都在这里） -->
+		<div class="cm-mbar">
+			<button class="btn" onclick={backToList}>← 文件列表</button>
+			<code class="cm-mfile">{active || '（未保存的新动态）'}</code>
+			{#if canImage}
+				<button class="btn small" onclick={addImage} title="插入本地图片（上传到图床）">🖼️</button>
+			{/if}
+			<button class="btn small" onclick={refresh} disabled={refreshing} title="重新从磁盘同步当前内容">↻</button>
+		</div>
+		<div class="cm-meditor">
+			{@render editorCard()}
+		</div>
+	{:else}
+		<!-- 列表屏：标题 + 整块「新建」 + 搜索 + 占满剩余高度的文件列表 -->
+		<div class="cm-mbar">
+			<b>{icon} {title}</b>
+			<span class="muted">共 {items.length} 篇</span>
+			<button class="btn small" onclick={refresh} disabled={refreshing} title="重新从磁盘同步文件列表">↻</button>
+		</div>
+		{#if canCreate}
+			<button
+				class="btn primary cm-block"
+				onclick={createKind === 'dynamic' ? create : () => (showNew = !showNew)}
+				disabled={busy}
+			>
+				＋ {createLabel}
+			</button>
+		{/if}
+		<input class="cm-msearch" placeholder="搜索文件…" bind:value={filter} />
+		<div class="card cm-list cm-mlist">
+			{#each filtered as it}
+				<button class="cm-item" class:active={active === it.rel} onclick={() => openOn(it.rel)} title={it.rel}>
+					<span class="cm-item-name">{it.rel.replace(`src/content/${folder}/`, '')}</span>
+					{#if active === it.rel}<span class="cm-item-flag">{dirty ? '未保存' : '打开中'}</span>{/if}
+				</button>
+			{/each}
+			{#if !filtered.length}<p class="muted">（空）</p>{/if}
+		</div>
+	{/if}
+{:else}
+<!-- ===== 宽屏：一页两栏（列表 + 编辑器） ===== -->
+<div class="cm-layout">
+	<div class="card cm-list">
+		<input placeholder="搜索文件…" bind:value={filter} style="margin-bottom:8px" />
+		<div class="cm-chips">
+			{#each filtered as it}
+				<button class="cm-item" class:active={active === it.rel} onclick={() => open(it.rel)} title={it.rel}>
+					{it.rel.replace(`src/content/${folder}/`, '')}
+				</button>
+			{/each}
+		</div>
+		{#if !filtered.length}<p class="muted">（空）</p>{/if}
+	</div>
+	<!-- side="left"：手柄在编辑器左侧，往左拖才是把编辑器拖宽（分界线始终跟手） -->
+	<DragBar side="left" width={editorW} onresize={setEditorW} onfinish={persistEditorW} />
+	{@render editorCard()}
 </div>
+{/if}
 
 {#if showLogPanel}
 	<div class="card" style="margin-top:12px">
@@ -775,5 +882,77 @@
 	}
 	.seg .btn {
 		border: none;
+	}
+
+	/* ===== 窄屏专属（这些类只在 isNarrow 时才渲染，见上面的两屏切换）===== */
+	/* 一行 40px 高的头：左边返回 / 标题，右边次要操作 */
+	.cm-mbar {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		flex-shrink: 0;
+		min-height: 40px;
+	}
+	.cm-mbar .btn {
+		flex-shrink: 0;
+	}
+	.cm-mfile {
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		white-space: nowrap;
+		text-overflow: ellipsis;
+		text-align: center;
+		font-size: 12.5px;
+		color: var(--muted);
+	}
+	.cm-block {
+		width: 100%;
+		padding: 12px;
+		font-size: 15px;
+		flex-shrink: 0;
+	}
+	.cm-msearch {
+		flex-shrink: 0;
+	}
+	/* 列表屏：搜索框之下全部留给列表，列表自己内部滚动 */
+	.cm-mlist {
+		flex: 1;
+		min-height: 220px;
+		overflow: auto;
+	}
+	.cm-item-name {
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	/* 窄屏的列表是一行一个文件（不是宽屏那种横向 chips），行高给到手指好按的大小 */
+	.cm-mlist .cm-item {
+		display: flex;
+		align-items: center;
+		padding: 12px 10px;
+		border-radius: 8px;
+	}
+	.cm-item-flag {
+		flex-shrink: 0;
+		margin-left: 8px;
+		font-size: 11px;
+		color: var(--accent-deep);
+	}
+	/* 编辑屏：编辑器占满剩下的高度，正文框随它一起长高 */
+	.cm-meditor {
+		flex: 1;
+		min-height: 0;
+		display: flex;
+	}
+	.cm-meditor > .cm-editor {
+		flex: 1;
+		width: 100%;
+		min-width: 0;
+		height: auto;
+	}
+	.cm-new {
+		flex: 1;
 	}
 </style>

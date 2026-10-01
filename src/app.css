@@ -337,11 +337,15 @@ fieldset.group > legend {
    移动端适配（窄屏）
    --------------------------------------------------------------------------
    桌面端是「定宽侧栏 + 内容区」的两栏布局，窄屏放不下，这里在 900px 以下切成：
-   顶栏（汉堡键）+ 抽屉式侧栏 + 整宽内容区；内容页内部的两栏（文件列表 / 编辑器、
-   配置列表 / 表单）改为上下堆叠。
+   顶栏（汉堡键 + 刷新键）+ 抽屉式侧栏 + 整宽内容区。
+
+   内容页内部的两栏（文件列表 / 编辑器、配置列表 / 表单）在窄屏**不再堆叠**：
+   组件自己按 matchMedia 切成「整屏列表 ↔ 整屏表单」两屏（见 ContentManager.svelte
+   的 screen / ConfigCenter.svelte 的 screen），堆叠版每一栏都只有半屏高，
+   字段点不完、编辑框被压扁。这里只保留它们仍然需要的少量覆盖。
 
    注意：组件自己的样式是 Svelte scoped（选择器带 hash，优先级更高），
-   所以对组件内部类（.cm-layout / .cc-list …）的覆盖必须用 !important。
+   所以对组件内部类（.cm-editor / .cm-list …）的覆盖必须用 !important。
    这些规则只在媒体查询里生效，不影响桌面端。
    ========================================================================== */
 @media (max-width: 900px) {
@@ -352,16 +356,25 @@ fieldset.group > legend {
 		min-height: 100dvh;
 	}
 
-	/* 顶栏：吸顶，左右两个方键 + 中间标题 */
+	/* 顶栏：吸顶，只留左右两个方键。
+	   底色跟着**全局卡片不透明度**（--sidebar-alpha，与侧栏同一档）走 —— 以前这里是
+	   写死的 rgba(...,0.92)，把「卡片不透明度」滑块拉到 30% 时整条顶栏还是实心的，
+	   与下面的界面完全脱节。
+	   中间没有标题：标题和抽屉里选中的那一项是同一个名字，不占这一行。 */
 	.ff-mobile-bar {
 		display: flex;
 		align-items: center;
+		justify-content: space-between;
 		gap: 8px;
 		position: sticky;
 		top: 0;
 		z-index: 45;
 		padding: 8px 10px;
-		background: rgba(251, 254, 253, 0.92);
+		background: linear-gradient(
+			180deg,
+			rgba(231, 248, 243, var(--sidebar-alpha)) 0%,
+			rgba(251, 254, 253, var(--sidebar-alpha)) 100%
+		);
 		backdrop-filter: blur(8px);
 		border-bottom: 1px solid var(--line);
 	}
@@ -371,27 +384,17 @@ fieldset.group > legend {
 		flex-shrink: 0;
 		border: 1px solid var(--line);
 		border-radius: 10px;
-		background: #fff;
+		background: rgba(255, 255, 255, var(--panel-alpha));
 		color: var(--accent-deep);
 		font-size: 17px;
 		line-height: 1;
 		cursor: pointer;
 	}
-	.ff-burger:active {
-		background: var(--accent-soft);
-	}
-	.ff-mobile-title {
-		flex: 1;
-		min-width: 0;
-		overflow: hidden;
-		white-space: nowrap;
-		text-overflow: ellipsis;
-		font-weight: 700;
-		font-size: 15px;
-		color: var(--accent-deep);
-	}
 
-	/* 侧栏 → 左侧抽屉（默认滑出屏幕外，.mobile-open 时滑入） */
+	/* 侧栏 → 左侧抽屉（默认滑出屏幕外，.mobile-open 时滑入）。
+	   ⚠️ 抽屉**强制不透明**：它上面没有壁纸以外的任何东西可以衬底，
+	   「卡片不透明度」拉到 0.3 会让菜单项直接糊在壁纸上，完全看不清。
+	   不透明度设置对抽屉里的界面元素仍然生效（卡片/按钮），只是抽屉底板本身压实。 */
 	.sidebar {
 		position: fixed;
 		top: 0;
@@ -406,6 +409,12 @@ fieldset.group > legend {
 		transform: translateX(-102%);
 		transition: transform 0.22s ease;
 		box-shadow: 0 10px 40px rgba(12, 28, 26, 0.28);
+		background: linear-gradient(
+			180deg,
+			rgba(231, 248, 243, 0.99) 0%,
+			rgba(251, 254, 253, 0.99) 55%,
+			rgba(253, 246, 234, 0.99) 130%
+		);
 	}
 	.sidebar.mobile-open {
 		transform: none;
@@ -425,74 +434,36 @@ fieldset.group > legend {
 		overflow: visible;
 	}
 
-	/* 内容页的两栏 → 上下堆叠 */
-	.cm-layout,
-	.cc-layout {
-		flex-direction: column !important;
-		gap: 10px !important;
+	/* 窄屏两屏页面（.cm-page / .cc-page）撑满「顶栏以下」的整屏，
+	   里面的列表 / 表单才能靠 flex 拿到全部高度而不是挤成半屏 */
+	.cm-page,
+	.cc-page {
+		min-height: calc(100dvh - 90px);
 	}
-	.cm-list,
-	.cc-list {
-		width: 100% !important;
+
+	/* 编辑器内部：整屏高度由 flex 给（不再是 62vh 那种半屏写死值），
+	   工具栏按钮允许换行，免得「保存」被挤出屏幕 */
+	.cm-meditor > .cm-editor {
 		height: auto !important;
-		max-height: 38vh;
-		min-width: 0 !important;
-	}
-	.cm-editor,
-	.cc-editor {
-		width: 100% !important;
-		min-width: 0 !important;
-	}
-	/* 移动端编辑器内部：给足高度，工具栏允许换行但紧凑，编辑区不再被压缩没 */
-	.cm-editor {
-		height: 62vh !important;
-		min-height: 420px !important;
-		overflow-y: auto !important;
+		min-height: 0 !important;
+		overflow: hidden !important;
 	}
 	.cm-editor > .row {
 		flex-wrap: wrap !important;
 		row-gap: 6px !important;
 	}
-	/* 文件列表横向 chips 的配套：按钮组横滚，避免把保存/删除挤出屏幕 */
 	.cm-editor .row .row {
 		flex-wrap: wrap !important;
 	}
-	/* 移动端文件列表：改成**横向滚动 chips**，不再占 1/3 屏高、不把编辑器挤没。
-	   组件里 .cm-list 是纵向 flex + overflow:auto，这里覆盖为横排 + 水平滚动；
-	   搜索框单独占一行，chips 在下面横向滚。 */
-	.cm-list {
-		flex-direction: column !important;
-		align-items: stretch !important;
-		gap: 8px !important;
-		height: auto !important;
+	/* 窄屏文件列表是一行一个（.cm-mlist），不再需要宽屏那种横向 chips 布局 */
+	.cm-mlist {
 		max-height: none !important;
-		padding: 10px 12px !important;
 	}
-	.cm-list > input {
+	.cm-mlist .cm-item {
 		width: 100% !important;
 		max-width: none !important;
-		margin-bottom: 0 !important;
 	}
-	.cm-list .cm-chips {
-		display: flex;
-		flex-direction: row !important;
-		align-items: center !important;
-		gap: 8px !important;
-		overflow-x: auto !important;
-		overflow-y: hidden !important;
-		white-space: nowrap;
-		-webkit-overflow-scrolling: touch;
-		padding-bottom: 2px;
-	}
-	.cm-item {
-		display: inline-flex !important;
-		width: auto !important;
-		max-width: 72vw;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		flex-shrink: 0;
-	}
-	/* 堆叠之后横向拖拽条没有意义（而且宽度只剩 9px 会变成一条竖线），直接隐藏 */
+	/* 堆叠/整屏布局下横向拖拽条没有意义（而且宽度只剩 9px 会变成一条竖线），直接隐藏 */
 	.dragbar {
 		display: none !important;
 	}
@@ -552,8 +523,9 @@ fieldset.group > legend {
 	.brand {
 		font-size: 15px;
 	}
-	.cm-list,
-	.cc-list {
-		max-height: 32vh;
+	/* 看板娘在手机上占右下角一格，列表/表单底部多留一点，别让最后一项压在它下面 */
+	.cm-mbar,
+	.cc-mbar {
+		font-size: 14px;
 	}
 }

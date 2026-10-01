@@ -12,7 +12,19 @@
 	import { errMsg } from '../lib/err'
 	import { confirmDanger } from '../lib/confirm.svelte'
 	import type { AppearanceSettings } from '../lib/api'
-	import { applyWallpaperFromConfig } from '../lib/api'
+	import {
+		applyWallpaperFromConfig,
+		currentWallpaperUrl,
+		isNarrowViewport,
+		type WallpaperCfg
+	} from '../lib/api'
+	import {
+		onPicked,
+		startPick,
+		takePicked,
+		PICK_LABELS,
+		type PickSlot
+	} from '../lib/pick-image'
 	// DEV-BYPASS: 调试用密码登录入口（上线前删除）
 	import DevLogin from '../components/DevLogin.svelte'
 
@@ -25,7 +37,8 @@
 		onLive2dToggle,
 		onLive2dScale,
 		onLive2dCollapse,
-		onLive2dExpand
+		onLive2dExpand,
+		onLive2dResetPos
 	}: {
 		appearance: AppearanceSettings
 		ACCENT_PRESETS: { name: string; accent: string; deep: string }[]
@@ -36,12 +49,14 @@
 		onLive2dScale?: (v: number) => void
 		onLive2dCollapse?: () => void
 		onLive2dExpand?: () => void
+		onLive2dResetPos?: () => void
 	} = $props()
 
 	const notify = getContext<(m: string, ok?: boolean) => void>('notify')
 	const setAccent = getContext<(name: string, accent: string, deep: string) => Promise<void>>('setAccent')
 
 	const API_BASE: string = (import.meta.env.VITE_API_URL ?? '(同源)').replace(/\/+$/, '')
+	const gotoPage = getContext<(id: string) => void>('gotoPage')
 
 	let raw = $state('')
 	let original = $state('')
@@ -98,19 +113,19 @@
 	}
 
 	// ---------- 后台壁纸（路径存后端 D1 site_config，key=wallpaper） ----------
-	// 图床直链/任意图片 URL 都行；顺便复用图床上传选图
+	// 桌面 / 手机两张图分开设；减淡与卡片不透明度是全局一套，不分端
 	let wpUrl = $state('')
+	let wpMobileUrl = $state('')
 	let wpDim = $state(0.45)
 	let cardOp = $state(1)
 	let wpLoading = $state(true)
-
-	interface WallpaperCfg { url?: string; dim?: number; cardOpacity?: number }
 
 	async function loadWallpaper(): Promise<void> {
 		try {
 			const raw = await window.api.configGet('wallpaper')
 			const cfg = (raw ? JSON.parse(raw) : {}) as WallpaperCfg
 			wpUrl = cfg.url ?? ''
+			wpMobileUrl = cfg.mobileUrl ?? ''
 			wpDim = cfg.dim ?? 0.45
 			cardOp = cfg.cardOpacity ?? 1
 		} catch {
@@ -120,9 +135,13 @@
 		}
 	}
 
+	function wallpaperConfig(): WallpaperCfg {
+		return { url: wpUrl.trim(), mobileUrl: wpMobileUrl.trim(), dim: wpDim, cardOpacity: cardOp }
+	}
+
 	async function saveWallpaper(): Promise<void> {
 		try {
-			const cfg: WallpaperCfg = { url: wpUrl.trim(), dim: wpDim, cardOpacity: cardOp }
+			const cfg = wallpaperConfig()
 			await window.api.configSet('wallpaper', JSON.stringify(cfg))
 			applyWallpaperFromConfig(JSON.stringify(cfg))
 			notify('壁纸已保存')
@@ -131,20 +150,40 @@
 		}
 	}
 
-	/** 从图床上传选图 → 拿直链填进输入框（不自动保存，用户确认后再存） */
-	async function pickFromImgBed(): Promise<void> {
-		try {
-			const refs = await window.api.assetImport('')
-			if (!refs.length) return
-			wpUrl = refs[0]
-			notify('已填入图床直链，点「保存壁纸」生效')
-		} catch (e) {
-			notify(errMsg(e), false)
-		}
+	/** 从图床上传选图 → 拿直链填进指定那栏（手机端填 mobileUrl，桌面端填 url） */
+	/**
+	 * 「从相册选择」：两端统一走后台内部流程 —— 跳到图床管理页，在那儿**上传**（系统相册
+	 * / 文件选择器）或**点一张图床里现成的图**，直链自动填回这里。
+	 *
+	 * 为什么不用直接 `<input type="file">`：手机上点它会跳出**系统相册**（另一个应用），
+	 * 选完图还得自己再回后台传一遍图床 —— 两步变三步。走图床页则一步到位。
+	 *
+	 * 电脑端同样走这条路（不是给手机开的后门）：两端行为一致，用户不需要记两套操作。
+	 * 约定细节见 lib/pick-image.ts（模块级单例，因为切页会销毁本组件）。
+	 */
+	function gotoImgBed(target: PickSlot): void {
+		startPick(target)
+		gotoPage('gallery')
 	}
+
+	/** 图床页交回来的直链 → 填进对应那一栏 */
+	function acceptPicked(url: string, target: PickSlot): void {
+		if (target === 'wallpaper-mobile') wpMobileUrl = url
+		else wpUrl = url
+		notify(`已填入图床直链，点「保存壁纸」生效`)
+	}
+
+	// 两种到达路径都要接住：① 图床页用 CustomEvent 推过来（本页还没被销毁）；
+	//                       ② 本页是被切页销毁后重新挂载的，那就去读 localStorage 里的待消费记录。
+	$effect(() => onPicked(acceptPicked))
+	$effect(() => {
+		const got = takePicked()
+		if (got) acceptPicked(got.url, got.target)
+	})
 
 	function clearWallpaper(): void {
 		wpUrl = ''
+		wpMobileUrl = ''
 		applyWallpaperFromConfig(null)
 		void saveWallpaper()
 	}
@@ -173,53 +212,69 @@
 	{#if wpLoading}
 		<p class="muted">正在读取…</p>
 	{:else}
-		<div class="row" style="gap:8px; margin-bottom:8px">
-			<input
-				type="text"
-				bind:value={wpUrl}
-				placeholder="壁纸图片 URL（图床直链或任意图片地址）"
-				style="flex:1; min-width:180px"
-			/>
-			<button class="btn small" onclick={pickFromImgBed}>📤 从图床选图</button>
+		<!-- 桌面 / 手机两张壁纸分开设：窄屏（≤900px）用「手机壁纸」，留空则沿用桌面那张。
+		     每端一格：标签在上、输入框整行、按钮整行 —— 挤成「标签+输入框+按钮」一行时
+		     手机上必然换行错位。 -->
+		<div class="wp-grid">
+			<div class="wp-slot">
+				<label class="flabel" for="wp-desktop">💻 电脑壁纸</label>
+				<input id="wp-desktop" type="text" bind:value={wpUrl} placeholder="图片 URL（图床直链或任意图片地址）" />
+				<button class="btn small" onclick={() => gotoImgBed('wallpaper-desktop')}>🖼️ 从相册中选择</button>
+			</div>
+			<div class="wp-slot">
+				<label class="flabel" for="wp-mobile">📱 手机壁纸</label>
+				<input id="wp-mobile" type="text" bind:value={wpMobileUrl} placeholder="留空 = 沿用电脑那张" />
+				<button class="btn small" onclick={() => gotoImgBed('wallpaper-mobile')}>🖼️ 从相册中选择</button>
+			</div>
 		</div>
-		<div class="row" style="margin-top:12px; gap:10px">
-			<span class="muted" style="min-width:64px">壁纸减淡</span>
-			<input
-				type="range"
-				min="0"
-				max="0.85"
-				step="0.05"
-				value={wpDim}
-				oninput={(e) => (wpDim = Number((e.target as HTMLInputElement).value))}
-				style="flex:1; max-width:320px"
-			/>
-			<span class="muted">{Math.round(wpDim * 100)}%</span>
+		<div class="wp-grid" style="margin-top:14px">
+			<div class="wp-slot">
+				<span class="flabel">壁纸减淡</span>
+				<div class="row" style="gap:10px; flex-wrap:nowrap">
+					<input
+						type="range"
+						min="0"
+						max="0.85"
+						step="0.05"
+						value={wpDim}
+						oninput={(e) => (wpDim = Number((e.target as HTMLInputElement).value))}
+					/>
+					<span class="muted wp-pct">{Math.round(wpDim * 100)}%</span>
+				</div>
+			</div>
+			<div class="wp-slot">
+				<span class="flabel">卡片不透明度</span>
+				<div class="row" style="gap:10px; flex-wrap:nowrap">
+					<input
+						type="range"
+						min="0.3"
+						max="1"
+						step="0.05"
+						value={cardOp}
+						oninput={(e) => (cardOp = Number((e.target as HTMLInputElement).value))}
+					/>
+					<span class="muted wp-pct">{Math.round(cardOp * 100)}%</span>
+				</div>
+			</div>
 		</div>
-		<div class="row" style="margin-top:12px; gap:10px">
-			<span class="muted" style="min-width:64px">卡片不透明度</span>
-			<input
-				type="range"
-				min="0.3"
-				max="1"
-				step="0.05"
-				value={cardOp}
-				oninput={(e) => (cardOp = Number((e.target as HTMLInputElement).value))}
-				style="flex:1; max-width:320px"
-			/>
-			<span class="muted">{Math.round(cardOp * 100)}%</span>
-		</div>
-		<div class="row" style="margin-top:10px; justify-content:space-between; gap:10px">
+		<div class="row" style="margin-top:14px; justify-content:space-between; gap:10px">
 			<p class="hint" style="margin:0; max-width:520px">
 				壁纸路径存在后端 D1（key=<code>wallpaper</code>），登录后所有设备通用；
-				图床选图会把图传到 <code>{API_BASE}</code> 的图床再取直链。调低卡片不透明度可透出壁纸。
+				图床选图会把图传到 <code>{API_BASE}</code> 的图床再取直链。<br />
+				页面宽度 ≤900px 自动用「手机壁纸」，留空则沿用电脑那张；减淡与卡片不透明度两端通用。
 			</p>
 			<div class="row" style="gap:8px">
-				{#if wpUrl}
+				{#if wpUrl || wpMobileUrl}
 					<button class="btn small danger" onclick={clearWallpaper}>清除</button>
 				{/if}
 				<button class="btn small primary" onclick={saveWallpaper}>保存壁纸</button>
 			</div>
 		</div>
+		<!-- 当前这台设备实际生效的那张图：分端设置最容易被「我明明填了怎么没变」绕晕 -->
+		<p class="hint wp-now">
+			<span class="tag">{isNarrowViewport() ? '📱 手机壁纸' : '💻 电脑壁纸'}</span>
+			<span class="wp-now-url">{currentWallpaperUrl(wallpaperConfig()) || '（未设置壁纸）'}</span>
+		</p>
 	{/if}
 </div>
 
@@ -270,14 +325,24 @@
 <div class="card" style="margin-top:14px">
 	<h3>🌸 看板娘</h3>
 	<div class="row" style="justify-content:space-between; flex-wrap:wrap; gap:10px">
-		<label class="row" style="gap:8px; cursor:pointer">
-			<input type="checkbox" checked={live2dEnabled} onchange={(e) => onLive2dToggle?.((e.target as HTMLInputElement).checked)} />
-			<span>显示看板娘（桌面端在侧栏底部，手机上在右下角悬浮）</span>
+		<!-- 勾选框：全局 input{width:100%} 会把这个勾拉成一条莫名其妙的横条，
+		     这里显式改回 auto，并且让文字跟着勾一起换行而不是掉到下一行 -->
+		<label class="l2d-toggle">
+			<input
+				type="checkbox"
+				checked={live2dEnabled}
+				onchange={(e) => onLive2dToggle?.((e.target as HTMLInputElement).checked)}
+			/>
+			<span>
+				显示看板娘
+				<span class="muted">（电脑端在侧栏底部，手机上在右下角悬浮；关掉就不再加载模型）</span>
+			</span>
 		</label>
 		<div class="row" style="gap:8px">
 			{#if live2dEnabled}
 				<button class="btn small" onclick={onLive2dCollapse}>收起</button>
 				<button class="btn small" onclick={onLive2dExpand}>展开</button>
+				<button class="btn small" onclick={onLive2dResetPos}>📍 重置位置</button>
 			{/if}
 		</div>
 	</div>
@@ -296,7 +361,9 @@
 	</div>
 	<p class="hint">
 		看板娘用的是 Firefly 官方 Live2D 资源（与主题同一套 v6.6.2），由 <code>public/live2d/</code> 直出；
-		不显示时不会加载，也不再占用渲染资源。
+		不显示时不会加载，也不再占用渲染资源。<br />
+		手机上换位置：<b>长按模型 0.35 秒</b>直接拖动，或抓住左上角那颗把手拖；
+		拖完的位置记在这台设备上（localStorage），换设备各拖各的。短按模型仍然是摸头 / 点表情。
 	</p>
 </div>
 
@@ -309,6 +376,55 @@
 </div>
 
 <style>
+	/* 壁纸两栏：≥560px 时电脑/手机并排，窄一点就各占一整行（标签-输入框-按钮竖排） */
+	.wp-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+		gap: 12px;
+	}
+	.wp-slot {
+		display: flex;
+		flex-direction: column;
+		align-items: stretch;
+		gap: 6px;
+		min-width: 0;
+	}
+	.wp-slot .flabel {
+		margin-bottom: 0;
+	}
+	.wp-slot .btn {
+		align-self: flex-start;
+	}
+	.wp-slot input[type='range'] {
+		flex: 1;
+		/* 全局 input{width:100%} 会给滑块一个 100% 的 flex-basis，和百分比间距一起溢出容器 */
+		width: auto;
+		min-width: 0;
+		padding: 0;
+		border: none;
+		background: transparent;
+	}
+	.wp-pct {
+		flex-shrink: 0;
+		min-width: 38px;
+		text-align: right;
+	}
+	.wp-now {
+		margin: 10px 0 0;
+		display: flex;
+		align-items: flex-start;
+		gap: 6px;
+	}
+	.wp-now .tag {
+		flex-shrink: 0;
+	}
+	.wp-now-url {
+		min-width: 0;
+		/* 图床直链很长：不打断就撑破卡片，打断才不会顶出边框 */
+		word-break: break-all;
+		line-height: 1.5;
+	}
+
 	.swatch-btn {
 		display: flex;
 		flex-direction: column;
@@ -331,5 +447,21 @@
 	}
 	.swatch-name {
 		font-size: 12px;
+	}
+	/* 看板娘开关：勾 + 说明文字同一行基线对齐，文字内部正常换行 */
+	.l2d-toggle {
+		display: flex;
+		align-items: flex-start;
+		gap: 8px;
+		cursor: pointer;
+		flex-wrap: nowrap;
+		min-width: 0;
+		flex: 1 1 260px;
+		line-height: 1.6;
+	}
+	.l2d-toggle input[type='checkbox'] {
+		flex: none;
+		width: auto;
+		margin: 4px 0 0;
 	}
 </style>

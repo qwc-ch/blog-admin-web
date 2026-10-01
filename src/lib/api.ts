@@ -235,11 +235,41 @@ function applyAccent(): void {
 	}
 }
 
-/** 应用 D1 壁纸配置（url + 减淡 + 卡片透明度）到全屏壁纸层；没有配置则移除 */
+/**
+ * 后台壁纸配置（存后端 D1 `site_config`，key=wallpaper）。
+ *
+ * `url` 是桌面壁纸，`mobileUrl` 是手机壁纸 —— 两张图分开设，
+ * 窄屏（≤900px，与全局断点一致）用后者，留空则回落到桌面那张。
+ * 减淡 / 卡片不透明度是全局一套，不分端。
+ */
+export interface WallpaperCfg {
+	url?: string
+	mobileUrl?: string
+	dim?: number
+	cardOpacity?: number
+}
+
+/** 最近一次应用的壁纸配置原文：断点切换时要靠它重挑一张图 */
+let wallpaperRaw: string | null = null
+
+/** 当前是不是窄屏（与 App.svelte 的移动端断点同一个值） */
+export function isNarrowViewport(): boolean {
+	return typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches
+}
+
+/** 按当前视口挑一张壁纸：窄屏优先 mobileUrl，空的回落 url */
+export function currentWallpaperUrl(cfg: WallpaperCfg | null): string {
+	if (!cfg) return ''
+	const desk = (cfg.url ?? '').trim()
+	return (isNarrowViewport() ? (cfg.mobileUrl ?? '').trim() || desk : desk)
+}
+
+/** 应用 D1 壁纸配置（图片 + 减淡 + 卡片透明度）到全屏壁纸层；没有配置则移除 */
 export function applyWallpaperFromConfig(raw: string | null): void {
+	wallpaperRaw = raw
 	try {
-		const cfg = raw ? JSON.parse(raw) as { url?: string; dim?: number; cardOpacity?: number } : null
-		const url = cfg?.url?.trim()
+		const cfg = raw ? (JSON.parse(raw) as WallpaperCfg) : null
+		const url = currentWallpaperUrl(cfg)
 		let el = document.querySelector<HTMLElement>('.ff-wallpaper')
 		if (url) {
 			if (!el) {
@@ -259,6 +289,11 @@ export function applyWallpaperFromConfig(raw: string | null): void {
 	} catch {
 		/* 配置损坏就当作没有壁纸 */
 	}
+}
+
+/** 视口跨过 900px 断点时重挑一张壁纸（手机壁纸 ↔ 桌面壁纸），其余设置保持不变 */
+export function refreshWallpaperForViewport(): void {
+	applyWallpaperFromConfig(wallpaperRaw)
 }
 
 export function installApi(): void {

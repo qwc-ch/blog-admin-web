@@ -17,8 +17,12 @@ export interface ContentItem {
 	title: string
 	/** 草稿标记 */
 	draft: boolean
-	/** 排序/显示日期（updated 优先，其次 published） */
+	/** 排序/显示用的兜底日期（updated 优先，其次 published） */
 	date: string
+	/** 发表日期 —— 列表排序**按它**（博客惯例）；可能为空 */
+	published: string
+	/** 最后更新日期；可能为空 */
+	updated: string
 	/** 分类 */
 	category: string
 	/** 标签 */

@@ -317,6 +317,8 @@ export function installApi(): void {
 					title?: string
 					draft?: boolean
 					date?: string
+					published?: string
+					updated?: string
 					category?: string
 					tags?: string[]
 					image?: string
@@ -326,12 +328,15 @@ export function installApi(): void {
 			if (!configsCache) await configs().catch(() => undefined) // 预热，fileWrite 等要用
 			return r.items.map((it) => ({
 				rel: it.path,
+				// 只有 date，没有 published 的旧文章（以及旧后端）仍能得到正确的排序时间
 				mtimeMs: it.date ? Date.parse(it.date.replace(' ', 'T')) || 0 : 0,
 				slug: it.slug,
 				// 旧后端（没部署这版 collections.ts）不返回这些字段时的兜底
 				title: it.title ?? it.slug,
 				draft: !!it.draft,
 				date: it.date ?? '',
+				published: it.published ?? it.date ?? '',
+				updated: it.updated ?? '',
 				category: it.category ?? '',
 				tags: Array.isArray(it.tags) ? it.tags : [],
 				image: it.image ?? '',

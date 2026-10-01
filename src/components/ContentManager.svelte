@@ -426,8 +426,22 @@
 			// 新条目是我们自己建的、字段全知道，先本地插到最前面让界面立刻可用；
 			// 全量刷新丢后台跑，回来再覆盖（保持顺序/字段与仓库一致）。
 			if (!items.some((i) => i.rel === rel)) {
+				const today = todayStr()
 				items = [
-					{ rel, mtimeMs: Date.now(), slug, title, draft: false, date: todayStr(), category: '', tags: [], image: '', description: '' },
+					{
+						rel,
+						mtimeMs: Date.now(),
+						slug,
+						title,
+						draft: false,
+						date: today,
+						published: today,
+						updated: '',
+						category: '',
+						tags: [],
+						image: '',
+						description: ''
+					},
 					...items
 				]
 			}
@@ -557,19 +571,22 @@
 	}
 
 	/**
-	 * 列表：**按时间倒序**（新的在前），然后过滤。
+	 * 列表：**按文章自带的发表日期倒序**（新的在前），然后过滤。
 	 *
-	 * 为什么前端还要排一次：后端也排，但它的排序键是 `date || slug` ——
-	 * 拿**日期字符串和 slug 混着比**（`localeCompare('2026-07-21','hello-world')`
-	 * 的结果没有意义），所以缺日期的条目会插到任意位置。这里统一成：
-	 *   有日期的按日期倒序 → 没日期的按 mtimeMs 倒序 → 都靠 mtimeMs
+	 * 排序键是 `published`（frontmatter 里的 `published`），**不是** `updated` ——
+	 * 博客惯例是按发表时间排。一篇 4 月发表、5 月改过的文章，如果按 updated 排
+	 * 会跑到 5 月那堆里去，读起来像 5 月才发的。
+	 * 缺 published 的（老文章 / 非文章集合）回落到 date，再回落到 mtimeMs。
+	 *
 	 * 排序在**过滤之前**做，这样「搜出来的结果」本身也是按时间排的。
 	 */
 	const sorted = $derived.by(() =>
 		[...items].sort((a, b) => {
-			if (a.date && b.date) return b.date.localeCompare(a.date)
-			if (a.date) return -1
-			if (b.date) return 1
+			const ka = a.published || a.date
+			const kb = b.published || b.date
+			if (ka && kb) return kb.localeCompare(ka)
+			if (ka) return -1
+			if (kb) return 1
 			return b.mtimeMs - a.mtimeMs
 		})
 	)
@@ -688,7 +705,13 @@
 				<div class="cm-card-meta">
 					{#if it.category}<span class="cm-chip cm-chip-cat">{it.category}</span>{/if}
 					{#if it.draft}<span class="cm-chip cm-chip-draft">草稿</span>{/if}
-					{#if it.date}<span class="cm-card-date">{it.date.slice(0, 10)}</span>{/if}
+					{#if it.published || it.date}
+						<span class="cm-card-date">{it.published || it.date}</span>
+					{/if}
+					{#if it.updated && it.updated !== it.published}
+						<!-- 有 updated 且与 published 不同：这篇被改过，值得标出来 -->
+						<span class="muted">更新 {it.updated}</span>
+					{/if}
 					{#if active === it.rel && dirty}<span class="cm-chip cm-chip-draft">未保存</span>{/if}
 				</div>
 				{#if it.tags.length}

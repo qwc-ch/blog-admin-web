@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+	<meta charset="UTF-8" />
+	<title>流萤 Live2D</title>
+	<style>
+		html,
+		body {
+			margin: 0;
+			height: 100%;
+			background: transparent;
+			overflow: hidden;
+		}
+		.ff-live2d-dialog {
+			max-width: 168px;
+			font-size: 12px;
+			padding: 6px 10px;
+		}
+		/* 「调整模式」提示条由管理器画在容器上方（流萤头顶之上）：iframe 里的东西出不了
+		   容器，而且它不该跟着模型一起缩放，所以这块只在父页面渲染 */
+		body.ff-adjust {
+			cursor: move;
+		}
+	</style>
+	<script>
+		// 初始视图参数由管理器通过 URL 传入：?s=缩放&x=水平位移&y=垂直位移
+		function qp(name, d) {
+			const v = new URLSearchParams(location.search).get(name)
+			return v === null ? d : Number(v)
+		}
+		window.__ffView = { s: qp('s', 1), x: qp('x', 0), y: qp('y', 0) }
+		// 画面尺寸跟随 iframe 的实际大小，缩放与偏移沿用原项目
+		// （Firefly-live2d-6.6.2 官方配置：scale 0.94 / offsetX -20 / offsetY 12，
+		//  触摸端 0.90 / -12 / 8）。原项目文档也写明「根据页面布局设置桌面端和触摸端尺寸」，
+		//  管理器里这一层布局就是侧栏的看板娘格子，所以宽高取格子自身的尺寸；
+		//  用户还能用「调整看板娘」/设置页滑块在 URL 的 s/x/y 上继续微调。
+		var ffBoxW = Math.max(1, Math.round(window.innerWidth))
+		var ffBoxH = Math.max(1, Math.round(window.innerHeight))
+		window.FireflyLive2DConfig = {
+			side: 'left',
+			minWidth: 0,
+			width: ffBoxW,
+			height: ffBoxH,
+			scale: 0.94,
+			offsetX: -20,
+			offsetY: 12,
+			allowTouch: true,
+			touchWidth: 260,
+			touchHeight: 220,
+			touchScale: 0.9,
+			touchOffsetX: -12,
+			touchOffsetY: 8,
+			zIndex: 5,
+			// 管理器嵌入模式：① 画面尺寸跟随容器实时变化（容器由「模型大小」/侧栏宽度决定，
+			// 定死加载时的尺寸会把模型裁掉一角）；② 交互按钮（🔙😊🔗❌）竖排在容器右侧
+			// 那条 40px 带子里 —— 容器 = 模型 + 这条带子，按钮就落在桌子右边；
+			// ③ 外链交给管理器用系统浏览器打开
+			embed: true,
+			controlsGutter: 40,
+			// 管理器固定以 hw=1 加载（走 GPU 分支，不设人工帧率上限）；
+			// hw=0 的 CPU 分支留给独立部署这套看板娘时使用。
+			antialias: false,
+			hardware: qp('hw', 0) === 1,
+			maxFPS: 60,
+			// 明确传入 res 时保留开发诊断的分辨率覆盖。
+			resolution: qp('res', qp('hw', 0) === 1 ? Math.min(2, window.devicePixelRatio || 1) : 0.8),
+			resolutionOverride: new URLSearchParams(location.search).has('res'),
+			// 物理仿真（头发/衣摆摆动）：实测是 CPU 大头，可由管理器关闭省电
+			physics: qp('phys', 1),
+			pageTitleMessage: false,
+			linkHoverMessage: false,
+			bottomMessage: false,
+			welcome: '开拓者，我回来啦~',
+			idleMessageDelay: 150000,
+			idleMessageInterval: 180000,
+			debug: false
+		}
+	</script>
+</head>
+<body>
+	<script src="firefly-loader.js"></script>
+	<script>
+		;(function () {
+			// ===== 渲染帧计数 + 状态回报（暂停协议验证用，父页面忽略未知消息）=====
+			function l4ready() {
+				var l = window.FireflyLive2D
+				return !!(l && l.setPaused)
+			}
+			function reportTicker(got) {
+				var l = window.FireflyLive2D
+				window.parent.postMessage(
+					{
+						type: 'ff-ticker',
+						got: got || '',
+						// 渲染帧数由加载器自建节拍器统计（__ffRenderFrames）
+						frames: window.__ffRenderFrames || 0,
+						updMs: window.__ffUpdateMs || 0,
+						rndMs: window.__ffRenderMs || 0,
+						live: l4ready() ? !!l.live : false,
+						running: l4ready() && !l.paused
+					},
+					'*'
+				)
+			}
+			// 视图（缩放 / 位移）由管理器应用：容器现在正好等于模型，
+			// 在 iframe 内部再缩放只会把模型裁掉或留白。这里只负责把当前值报上去
+			function apply(commit) {
+				var v = window.__ffView
+				window.parent.postMessage({ type: 'ff-view', s: v.s, x: v.x, y: v.y, commit: !!commit }, '*')
+			}
+			var adjusting = false
+			var drag = null
+
+			function setAdjust(on) {
+				adjusting = on
+				document.body.classList.toggle('ff-adjust', on)
+			}
+
+			window.addEventListener('message', function (e) {
+				if (e.source !== window.parent) return
+				var d = e.data || {}
+				if (d.type === 'ff-view') {
+					window.__ffView = { s: d.s, x: d.x, y: d.y }
+					apply()
+				} else if (d.type === 'ff-pause') {
+					// 拖拽窗口/面板、空闲、失焦时暂停渲染循环，把 CPU 让出来，恢复后继续
+					var l2d = window.FireflyLive2D
+					if (l4ready()) l2d.setPaused(true)
+					reportTicker('pause')
+				} else if (d.type === 'ff-resume') {
+					var l2d2 = window.FireflyLive2D
+					if (l4ready()) l2d2.setPaused(false)
+					reportTicker('resume')
+				} else if (d.type === 'ff-live') {
+					// 流畅模式：鼠标在看板娘上或刚互动过
+					if (l4ready()) window.FireflyLive2D.setLive(true)
+					reportTicker('live')
+				} else if (d.type === 'ff-static') {
+					// 静止肖像：停渲染、保留最后一帧（零 CPU）
+					if (l4ready()) window.FireflyLive2D.setLive(false)
+					reportTicker('static')
+				} else if (d.type === 'ff-tick?') {
+					reportTicker('query')
+				} else if (d.type === 'ff-diag?') {
+					// 自检读数：鼠标追踪朝向 / 命中次数 / 当前表情 / 关键参数
+					var l3 = window.FireflyLive2D
+					var diag = l4ready() && l3.diag ? l3.diag() : null
+					window.parent.postMessage({ type: 'ff-diag', diag: diag, frames: window.__ffRenderFrames || 0 }, '*')
+				} else if (d.type === 'ff-tap') {
+					// 自检用：按命中区名字点一下（等效于用户真的点到脑袋/身体）
+					var lt = window.FireflyLive2D
+					if (l4ready() && typeof lt.tapHitArea === 'function') lt.tapHitArea(d.name || '刘海')
+				} else if (d.type === 'ff-expr' && typeof d.name === 'string') {
+					// 自检用：直接播放指定表情，验证表情链路是否生效
+					if (l4ready()) window.FireflyLive2D.playExpression(d.name)
+				} else if (d.type === 'ff-pointer') {
+					// 光标跟随（全局常开）：管理器把主窗口里的指针位置换算成 iframe 内坐标转发过来，
+					// 由加载器的快速跟随接手（iframe 内的那部分由加载器自己的 pointermove 收）
+					var lp = window.FireflyLive2D
+					if (l4ready() && typeof lp.focus === 'function') lp.focus(d.x, d.y)
+				} else if (d.type === 'ff-adjust') {
+					// 从调整模式退出（无论双击还是点按钮）都回报当前参数，确保保存
+					if (adjusting && !d.on) apply(true)
+					setAdjust(!!d.on)
+				}
+			})
+
+			document.addEventListener('pointerdown', function (e) {
+				if (!adjusting) return
+				drag = { px: e.clientX, py: e.clientY, x: window.__ffView.x, y: window.__ffView.y }
+			})
+			document.addEventListener('pointermove', function (e) {
+				if (!adjusting || !drag) return
+				window.__ffView.x = drag.x + (e.clientX - drag.px)
+				window.__ffView.y = drag.y + (e.clientY - drag.py)
+				apply()
+			})
+			document.addEventListener('pointerup', function () {
+				drag = null
+			})
+			document.addEventListener(
+				'wheel',
+				function (e) {
+					if (!adjusting) return
+					e.preventDefault()
+					var v = window.__ffView
+					v.s = Math.min(1.6, Math.max(0.35, v.s * (e.deltaY < 0 ? 1.06 : 1 / 1.06)))
+					apply()
+				},
+				{ passive: false }
+			)
+			document.addEventListener('dblclick', function () {
+				if (!adjusting) return
+				setAdjust(false)
+				apply(true)
+			})
+		})()
+
+		// ===== 「返回首页」→「收起看板娘」（在嵌入层接管，不改 live2d 源码）=====
+		//
+		// 为什么必须接管：加载器里的 🔙 是
+		//   `window.location.assign(new URL(cfg.homeUrl, window.location.href).href)`
+		// 而这里是 `…/live2d/embed.html`，`homeUrl` 默认 `"/"` 解析出来就是**管理器的根地址** ——
+		// 于是点一下等于**在这个 iframe 里又打开了一个管理器**（而且回不去，因为那个页面
+		// 不知道自己是嵌在看板娘格子里的）。收起侧栏那块显示区才是用户真正想要的语义。
+		//
+		// 接管点选在 **window 的捕获阶段**：加载器的处理器挂在按钮自身上（目标阶段），
+		// 而捕获阶段一定先于目标阶段执行，所以这里 `stopPropagation()` 能干净地拦掉它 ——
+		// 不必去改 firefly-loader.js，也不依赖任何内部变量。
+		;(function () {
+			var HOME_LABEL = '返回首页'
+			var MARK = 'ffCollapseBtn'
+
+			/** 认「那个按钮」：优先看我们打的标记，回退到加载器写的 aria-label */
+			function isHomeButton(el) {
+				if (!el || !el.classList || !el.classList.contains('ff-live2d-button')) return false
+				return el.dataset[MARK] === '1' || el.getAttribute('aria-label') === HOME_LABEL
+			}
+			function homeButtonOf(target) {
+				return target && target.closest ? target.closest('.ff-live2d-button') : null
+			}
+
+			// ① 点击：拦住导航，改成让父页面收起看板娘区
+			window.addEventListener(
+				'click',
+				function (e) {
+					var btn = homeButtonOf(e.target)
+					if (!isHomeButton(btn)) return
+					e.preventDefault()
+					e.stopPropagation() // ← 关键：拦掉加载器那次 window.location.assign
+					window.parent.postMessage({ type: 'ff-collapse' }, '*')
+				},
+				true
+			)
+
+			// ② 悬停/聚焦提示：加载器会说「点击这里返回首页！」，与实际行为不符。
+			//    它同样挂在按钮上（目标阶段），所以这里也在捕获阶段拦掉，自己说一句正确的。
+			//    ⚠️ 别改成「排在它后面再覆盖」（setTimeout）：那样错文案会先被发出去一次
+			//    （父页面收得到），只是通常来不及画出来而已 —— 拦掉才是真的没说过。
+			var HINT = '点击这里收起看板娘'
+			function retell(e) {
+				var btn = homeButtonOf(e.target)
+				if (!isHomeButton(btn)) return
+				e.stopPropagation()
+				var l = window.FireflyLive2D
+				if (l && typeof l.say === 'function') l.say(HINT)
+			}
+			window.addEventListener('mouseenter', retell, true)
+			window.addEventListener('focus', retell, true)
+
+			// ③ 无障碍名称也要跟着改：读屏念「返回首页」同样是错的。
+			//    按钮是加载器动态建的，所以打标记这一步要等它出现（并持续兜住重建）。
+			function relabel() {
+				var btn = document.querySelector('.ff-live2d-button[aria-label="' + HOME_LABEL + '"]')
+				if (!btn) return false
+				btn.dataset[MARK] = '1'
+				btn.setAttribute('aria-label', '收起看板娘')
+				return true
+			}
+			if (!relabel()) {
+				var mo = new MutationObserver(function () {
+					if (relabel()) mo.disconnect()
+				})
+				mo.observe(document.body, { childList: true, subtree: true })
+			}
+		})()
+
+		// ===== 命中区点击（在嵌入层接管，不改 live2d 源码）=====
+		//
+		// 现象：点刘海不触发墨镜、点左右侧发都触发同一个动作、猫耳点不到。
+		// 根因**不是**坐标算错，而是 **PIXI 的事件派发到不了模型**：
+		// 实测 canvas 收得到 pointerdown（加载器自己的计数器在涨），但模型收不到
+		// `pointerdown`（只收到 pointermove/pointerup），于是 `autoInteract` 依赖的
+		// `pointertap` 永不触发 → 加载器里的 `model.on("hit")` 永不执行 →
+		// 点在哪都只会走画布那次「兜底随机动作」，于是「点刘海变成随机表情」。
+		//
+		// 而模型自己的命中判定是**完全正常**的（在舞台坐标下按 10px 网格扫过，
+		// 五个命中区各自独立、边界清晰）。所以这里自己算一次命中，再调加载器
+		// 已经暴露出来的 `tapHitArea(name)` —— 它内部会走 `model.tap()`，
+		// 于是 `hitActions` 那套「刘海→墨镜 / 右侧后发→猫耳」原样生效。
+		//
+		// 坐标：`diag().box` 是舞台逻辑尺寸，实测正好等于 canvas 的 CSS 尺寸
+		// （284×164；canvasAttr 355×205 是乘了分辨率 1.25 的背板），
+		// 所以「客户端坐标 × box/CSS」就是舞台坐标。不写死 1.25 这类数字。
+		;(function () {
+			var TAP_MOVE_TOL = 6 // 超过这么多像素就算拖动，不当点击
+			var TAP_MS_TOL = 600
+			var down = null
+			// 可观测标记：探针/排查时一眼看出这层接管在不在（加载了缓存旧文件时最有用）
+			window.__ffTapBridge = { taps: 0, lastHit: null, lastStage: null, downs: 0, reason: 'init' }
+
+			window.addEventListener(
+				'pointerdown',
+				function (e) {
+					var B = window.__ffTapBridge
+					if (e.button !== 0) { B.reason = 'down:not-left'; return }
+					if (document.body.classList.contains('ff-adjust')) { B.reason = 'down:adjust'; return }
+					if (!(e.target instanceof HTMLCanvasElement)) { B.reason = 'down:target=' + (e.target && e.target.tagName); return }
+					down = { x: e.clientX, y: e.clientY, t: Date.now() }
+					B.downs++
+					B.reason = 'down:ok'
+				},
+				true
+			)
+
+			window.addEventListener(
+				'pointerup',
+				function (e) {
+					var B = window.__ffTapBridge
+					var d0 = down
+					down = null
+					if (!d0) { B.reason = 'up:no-down'; return }
+					if (e.button !== 0) { B.reason = 'up:not-left'; return }
+					if (Math.abs(e.clientX - d0.x) > TAP_MOVE_TOL || Math.abs(e.clientY - d0.y) > TAP_MOVE_TOL) { B.reason = 'up:moved'; return }
+					if (Date.now() - d0.t > TAP_MS_TOL) { B.reason = 'up:slow'; return }
+					if (document.body.classList.contains('ff-adjust')) { B.reason = 'up:adjust'; return }
+
+					var canvas = e.target
+					if (!(canvas instanceof HTMLCanvasElement)) { B.reason = 'up:target=' + (canvas && canvas.tagName); return }
+					var api = window.FireflyLive2D
+					var model = api && api.model
+					if (!model || typeof model.hitTest !== 'function') { B.reason = 'up:no-model'; return }
+
+					// CSS 坐标 → 舞台坐标（用 diag().box 与 canvas 的 CSS 尺寸换算）
+					var box = api.diag && api.diag().box
+					var rect = canvas.getBoundingClientRect()
+					if (!box || !rect.width || !rect.height) { B.reason = 'up:no-box'; return }
+					var sx = (e.clientX - rect.left) * (box[0] / rect.width)
+					var sy = (e.clientY - rect.top) * (box[1] / rect.height)
+
+					var hits = null
+					try {
+						hits = model.hitTest(sx, sy)
+					} catch (err) {
+						hits = null
+						B.reason = 'up:hitTest-threw:' + err.message
+						return
+					}
+					B.lastStage = [Math.round(sx), Math.round(sy)]
+					if (!hits || !hits.length) { B.reason = 'up:no-hit'; return } // 没命中专属区 → 放行，保留加载器原来的随机动作
+
+					var name = hits[0] && (hits[0].name || hits[0])
+					if (!name || typeof api.tapHitArea !== 'function') { B.reason = 'up:no-name'; return }
+
+					// 拦掉这次事件：否则 PIXI 那边若哪天又恢复了派发，会与这里**双触发**
+					e.stopPropagation()
+					e.preventDefault()
+					B.taps++
+					B.lastHit = name
+					B.reason = 'up:tapped:' + name
+					api.tapHitArea(name)
+				},
+				true
+			)
+		})()
+	</script>
+</body>
+</html>

@@ -1,0 +1,30 @@
+{
+  "name": "firefly-admin-web",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "tsc --noEmit",
+    "deploy:pages": "wrangler pages deploy dist --project-name=blog-admin-web"
+  },
+  "dependencies": {
+    "highlight.js": "^11.12.0",
+    "js-yaml": "^5.4.2",
+    "katex": "^0.18.9",
+    "marked": "^18.0.14",
+    "marked-highlight": "^2.2.4",
+    "marked-katex-extension": "^5.1.13"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5.0.0",
+    "@types/js-yaml": "^4.0.9",
+    "mermaid": "^12.0.0",
+    "pinyin-pro": "^3.29.4",
+    "svelte": "^5.0.0",
+    "typescript": "^5.9.2",
+    "vite": "^7.0.0"
+  }
+}

@@ -1,0 +1,501 @@
+:root {
+	/* 卡片底色与不透明度：两个变量都由设置页写入（侧栏可单独调） */
+	--panel: 255, 255, 255;
+	--panel-alpha: 1;
+	--sidebar-alpha: 1;
+	--line: #d9ece6;
+	--text: #1d2b28;
+	--muted: #6f8a83;
+	--accent: #14b8a6;
+	--accent-deep: #0d9488;
+	--accent-soft: #dcf5ef;
+	--amber: #f59e0b;
+	--danger: #d94b4b;
+	--warn-bg: #fff7e6;
+	--mono: 'Cascadia Code', Consolas, 'Courier New', monospace;
+}
+* {
+	box-sizing: border-box;
+}
+html,
+body,
+#app {
+	height: 100%;
+	margin: 0;
+}
+html {
+	/* 页面外围（窗口圆角、滚动露出的边缘）的兜底色，与主背景同色系 */
+	background: #eafaf6;
+}
+/* 侧栏装饰光点已移除：两个无限浮动的小点就吃掉约一整核 CPU
+   （每帧强制整窗重新合成）。新增动效/装饰前先想清楚这条代价。 */
+
+/* 空闲/失焦节能（App.svelte 维护该类）：暂停所有装饰动画，不让人离开屏幕后还白烧 CPU；
+   看板娘渲染循环由 ff-pause / ff-live / ff-static 消息单独控制，恢复活动后一切自动继续 */
+body.ff-idle *,
+body.ff-idle *::before,
+body.ff-idle *::after {
+	animation-play-state: paused !important;
+}
+/* 拖拽期间：整页禁用命中测试（事件目标退化为 body，window 上的监听不受影响），
+   消除光标扫过元素造成的 hover 重算/重绘，也让 iframe/webview 不再响应鼠标；
+   overflow:hidden 防止内容区跟随移动时出现滚动条 */
+body.ff-dragging {
+	overflow: hidden;
+}
+body.ff-dragging * {
+	pointer-events: none;
+}
+body {
+	font-family: 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
+	background: linear-gradient(155deg, #eafaf6 0%, #f4fbf8 45%, #fdf8ef 100%);
+	color: var(--text);
+	font-size: 14px;
+}
+h1,
+h2,
+h3 {
+	margin: 0 0 8px;
+}
+p {
+	margin: 6px 0;
+}
+button {
+	font: inherit;
+	cursor: pointer;
+}
+input,
+textarea,
+select {
+	font: inherit;
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	padding: 7px 10px;
+	width: 100%;
+	background: #fff;
+	color: var(--text);
+	outline: none;
+	transition: border-color 0.15s;
+	accent-color: var(--accent);
+}
+input:focus,
+textarea:focus,
+select:focus {
+	border-color: var(--accent);
+	box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.14);
+}
+textarea.code {
+	font-family: var(--mono);
+	font-size: 13px;
+	line-height: 1.6;
+	white-space: pre;
+	resize: vertical;
+}
+.btn {
+	border: 1px solid var(--line);
+	background: #fff;
+	border-radius: 8px;
+	padding: 7px 14px;
+	color: var(--text);
+	white-space: nowrap;
+	/* 只过渡真正会变的视觉属性。
+	   原来写的是 `transition: all`，会连布局类属性（以及 .nav-item.active 的
+	   font-weight 变化）一起过渡 —— 那些属性每帧都要重新布局，无法走合成层。 */
+	transition: color 0.15s, background 0.15s, border-color 0.15s, box-shadow 0.15s, filter 0.15s,
+		opacity 0.15s, transform 0.15s;
+}
+.btn:hover {
+	border-color: var(--accent);
+	color: var(--accent-deep);
+}
+.btn.primary {
+	background: linear-gradient(135deg, #2dd4bf, var(--accent) 55%, var(--accent-deep));
+	border-color: transparent;
+	color: #fff;
+	box-shadow: 0 2px 10px rgba(20, 184, 166, 0.35);
+}
+.btn.primary:hover {
+	box-shadow: 0 3px 16px rgba(20, 184, 166, 0.55);
+	filter: brightness(1.04);
+	color: #fff;
+}
+.btn.danger {
+	color: var(--danger);
+	border-color: #f0c4c6;
+}
+.btn.small {
+	padding: 4px 10px;
+	font-size: 13px;
+}
+.btn:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+.card {
+	background: rgba(var(--panel), var(--panel-alpha));
+	border: 1px solid var(--line);
+	border-radius: 14px;
+	padding: 16px;
+	box-shadow: 0 2px 8px rgba(23, 108, 96, 0.06);
+}
+.muted {
+	color: var(--muted);
+	font-size: 13px;
+}
+.row {
+	display: flex;
+	gap: 10px;
+	align-items: center;
+	flex-wrap: wrap;
+}
+.tag {
+	display: inline-block;
+	padding: 2px 10px;
+	border-radius: 99px;
+	background: var(--accent-soft);
+	color: var(--accent-deep);
+	font-size: 12px;
+}
+.layout {
+	display: flex;
+	height: 100%;
+	position: relative;
+	z-index: 1;
+	padding: 10px;
+	box-sizing: border-box;
+}
+.sidebar {
+	container-type: inline-size;
+	background: linear-gradient(
+		180deg,
+		rgba(231, 248, 243, var(--sidebar-alpha)) 0%,
+		rgba(251, 254, 253, var(--sidebar-alpha)) 55%,
+		rgba(253, 246, 234, var(--sidebar-alpha)) 130%
+	);
+	border: 1px solid var(--line);
+	border-radius: 18px;
+	box-shadow: 0 6px 24px rgba(23, 108, 96, 0.1);
+	padding: 18px 12px;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	flex-shrink: 1;
+	/* 拖拽下界由这里的 min-width 决定，不再写死在拖拽组件里 */
+	min-width: 150px;
+	position: relative;
+	overflow: hidden;
+	box-sizing: border-box;
+}
+.brand {
+	font-weight: 800;
+	font-size: 16px;
+	padding: 4px 10px 16px;
+	background: linear-gradient(90deg, var(--accent-deep) 20%, var(--accent) 55%, var(--amber) 110%);
+	-webkit-background-clip: text;
+	background-clip: text;
+	color: transparent;
+}
+.nav-item {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 10px 12px;
+	border-radius: 10px;
+	border: none;
+	background: transparent;
+	color: var(--muted);
+	text-align: left;
+	width: 100%;
+	position: relative;
+	z-index: 1;
+	/* 只过渡真正会变的视觉属性。
+	   原来写的是 `transition: all`，会连布局类属性（以及 .nav-item.active 的
+	   font-weight 变化）一起过渡 —— 那些属性每帧都要重新布局，无法走合成层。 */
+	transition: color 0.15s, background 0.15s, border-color 0.15s, box-shadow 0.15s, filter 0.15s,
+		opacity 0.15s, transform 0.15s;
+}
+.nav-item:hover {
+	color: var(--accent-deep);
+	background: rgba(255, 255, 255, 0.75);
+}
+.nav-item.active {
+	background: linear-gradient(90deg, var(--accent-soft), rgba(255, 255, 255, 0.9));
+	color: var(--accent-deep);
+	font-weight: 600;
+	box-shadow: inset 2px 0 0 var(--accent);
+}
+.content {
+	flex: 1;
+	overflow: auto;
+	padding: 12px 8px 12px 14px;
+	position: relative;
+	z-index: 1;
+	/* 内容区保底宽度：侧栏拖拽的上界由它推导，窗口变宽时侧栏就能继续往右拖 */
+	min-width: 320px;
+	box-sizing: border-box;
+}
+.toast {
+	position: fixed;
+	right: 22px;
+	bottom: 22px;
+	max-width: 480px;
+	padding: 11px 16px;
+	border-radius: 10px;
+	background: #142e2a;
+	color: #fff;
+	box-shadow: 0 8px 30px rgba(13, 74, 66, 0.28);
+	z-index: 99;
+	white-space: pre-wrap;
+}
+.toast.err {
+	background: var(--danger);
+}
+.field {
+	margin: 10px 0;
+}
+/* 全屏壁纸层（由 api.ts 的 applyAccent 动态挂到 body 下）。
+   层级：壁纸 0 < 布局 1 < 看板娘悬浮 40，所以界面始终盖在图上；
+   调低卡片/侧栏透明度（--panel-alpha / --sidebar-alpha）就能透出壁纸。 */
+.ff-wallpaper {
+	position: fixed;
+	inset: 0;
+	z-index: 0;
+	background-size: cover;
+	background-position: center;
+	pointer-events: none;
+}
+.field > label,
+.flabel {
+	display: block;
+	font-weight: 600;
+	margin-bottom: 5px;
+	font-size: 13.5px;
+}
+.hint {
+	color: var(--muted);
+	font-size: 12.5px;
+	margin-top: 3px;
+	line-height: 1.5;
+}
+fieldset.group {
+	border: 1px dashed var(--line);
+	border-radius: 10px;
+	padding: 4px 14px 10px;
+	margin: 8px 0;
+}
+fieldset.group > legend {
+	font-weight: 700;
+	font-size: 13px;
+	color: var(--accent);
+	padding: 0 6px;
+}
+.list-card {
+	border: 1px solid var(--line);
+	border-radius: 10px;
+	padding: 10px 12px;
+	margin: 8px 0;
+	background: #f8fdfb;
+}
+.list-card-head {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 4px;
+}
+.adv-box {
+	background: #f2f7f5;
+	border: 1px dashed #c4ddd5;
+	border-radius: 8px;
+	padding: 8px 10px;
+	font-family: var(--mono);
+	font-size: 12px;
+	color: #4b6360;
+	white-space: pre-wrap;
+	word-break: break-all;
+}
+
+/* 移动端顶栏与抽屉遮罩：桌面端隐藏。
+   ⚠️ 这两条必须写在 app.css（全局）里，不能写在 App.svelte 的 <style> 里 ——
+   组件样式是 scoped（选择器带 hash，优先级 0,2,0），会盖过下面媒体查询里的
+   `.ff-mobile-bar { display: flex }`（0,1,0），结果就是移动端顶栏永远不出现。 */
+.ff-mobile-bar,
+.ff-drawer-mask {
+	display: none;
+}
+
+/* ==========================================================================
+   移动端适配（窄屏）
+   --------------------------------------------------------------------------
+   桌面端是「定宽侧栏 + 内容区」的两栏布局，窄屏放不下，这里在 900px 以下切成：
+   顶栏（汉堡键）+ 抽屉式侧栏 + 整宽内容区；内容页内部的两栏（文件列表 / 编辑器、
+   配置列表 / 表单）改为上下堆叠。
+
+   注意：组件自己的样式是 Svelte scoped（选择器带 hash，优先级更高），
+   所以对组件内部类（.cm-layout / .cc-list …）的覆盖必须用 !important。
+   这些规则只在媒体查询里生效，不影响桌面端。
+   ========================================================================== */
+@media (max-width: 900px) {
+	.layout {
+		display: block;
+		padding: 0;
+		height: auto;
+		min-height: 100dvh;
+	}
+
+	/* 顶栏：吸顶，左右两个方键 + 中间标题 */
+	.ff-mobile-bar {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		position: sticky;
+		top: 0;
+		z-index: 45;
+		padding: 8px 10px;
+		background: rgba(251, 254, 253, 0.92);
+		backdrop-filter: blur(8px);
+		border-bottom: 1px solid var(--line);
+	}
+	.ff-burger {
+		width: 38px;
+		height: 38px;
+		flex-shrink: 0;
+		border: 1px solid var(--line);
+		border-radius: 10px;
+		background: #fff;
+		color: var(--accent-deep);
+		font-size: 17px;
+		line-height: 1;
+		cursor: pointer;
+	}
+	.ff-burger:active {
+		background: var(--accent-soft);
+	}
+	.ff-mobile-title {
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		white-space: nowrap;
+		text-overflow: ellipsis;
+		font-weight: 700;
+		font-size: 15px;
+		color: var(--accent-deep);
+	}
+
+	/* 侧栏 → 左侧抽屉（默认滑出屏幕外，.mobile-open 时滑入） */
+	.sidebar {
+		position: fixed;
+		top: 0;
+		left: 0;
+		bottom: 0;
+		z-index: 60;
+		width: min(82vw, 300px);
+		min-width: 0;
+		height: 100dvh;
+		overflow-y: auto;
+		border-radius: 0 18px 18px 0;
+		transform: translateX(-102%);
+		transition: transform 0.22s ease;
+		box-shadow: 0 10px 40px rgba(12, 28, 26, 0.28);
+	}
+	.sidebar.mobile-open {
+		transform: none;
+	}
+	.ff-drawer-mask {
+		display: block;
+		position: fixed;
+		inset: 0;
+		z-index: 55;
+		background: rgba(12, 28, 26, 0.42);
+	}
+
+	/* 内容区：整宽 + 底部留出看板娘悬浮的位置 */
+	.content {
+		min-width: 0;
+		padding: 12px 12px 120px;
+		overflow: visible;
+	}
+
+	/* 内容页的两栏 → 上下堆叠 */
+	.cm-layout,
+	.cc-layout {
+		flex-direction: column !important;
+		gap: 10px !important;
+	}
+	.cm-list,
+	.cc-list {
+		width: 100% !important;
+		height: auto !important;
+		max-height: 38vh;
+		min-width: 0 !important;
+	}
+	.cm-editor,
+	.cc-editor {
+		width: 100% !important;
+		min-width: 0 !important;
+	}
+	/* 堆叠之后横向拖拽条没有意义（而且宽度只剩 9px 会变成一条竖线），直接隐藏 */
+	.dragbar {
+		display: none !important;
+	}
+	/* 分屏编辑 → 上下两半 */
+	.split {
+		flex-direction: column !important;
+	}
+	/* 注意：app.css 是**普通 CSS**，不能写 Svelte 的 `:global(...)` ——
+	   那是组件内 <style> 的专属语法，出现在这里会被浏览器当成无效选择器整条丢掉 */
+	.split .md-preview {
+		border-left: none !important;
+		border-top: 1px dashed var(--line);
+		padding-left: 0 !important;
+		padding-top: 10px;
+	}
+
+	/* 卡片与工具栏：留白收紧、按钮允许换行 */
+	.card {
+		padding: 12px 12px !important;
+	}
+	.row {
+		flex-wrap: wrap;
+	}
+	.card input,
+	.card textarea,
+	.card select,
+	.content input,
+	.content textarea,
+	.content select {
+		/* iOS 上 < 16px 的输入框聚焦会自动放大页面 */
+		font-size: 16px;
+	}
+	.content textarea.code {
+		/* 手机上短一点就够，别把整页顶下去 */
+		min-height: 320px;
+	}
+
+	/* toast 贴满宽度，避免右侧被裁 */
+	.toast {
+		left: 12px;
+		right: 12px;
+		bottom: 12px;
+		max-width: none;
+	}
+
+	/* 图床网格：小屏两列就够 */
+	.img-grid {
+		grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)) !important;
+	}
+}
+
+/* 超窄屏（手机竖屏）再收紧一点 */
+@media (max-width: 560px) {
+	.content {
+		padding: 10px 8px 120px;
+	}
+	.brand {
+		font-size: 15px;
+	}
+	.cm-list,
+	.cc-list {
+		max-height: 32vh;
+	}
+}

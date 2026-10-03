@@ -146,6 +146,31 @@ async function uploadFile(file: File): Promise<string> {
 
 // ---------- window.api ----------
 
+/** Memos 动态的可见性 */
+export type MemoVisibility = 'PUBLIC' | 'PROTECTED' | 'PRIVATE'
+
+/**
+ * Memos 原生附件（图片存在 Memos 自己那边，不是博客图床）。
+ *
+ * `url` 是可直接塞进 `<img src>` 的地址：Memos 本地/Telegram 存储没有
+ * `externalLink`，走 `/file/{name}/{filename}`；挂到**公开**动态后匿名可读。
+ */
+export interface MemoAttachment {
+	name: string
+	id?: string | number
+	uid?: string
+	filename: string
+	type: string
+	url: string
+}
+
+/** 发布时回传给后端的附件标识（Memos 的 PATCH 只要这三个字段） */
+export interface MemoAttachmentRef {
+	id?: string | number
+	uid?: string
+	name: string
+}
+
 export interface WindowApiSubset {
 	appInit: () => Promise<{ projectPath: string; valid: boolean; appearance: AppearanceSettings; wallpaperData: string | null; dataDir: string }>
 	contentList: (folder: string) => Promise<ContentItem[]>
@@ -183,9 +208,25 @@ export interface WindowApiSubset {
 	/** D1 site_config 键值配置（登录后可用） */
 	configGet: (key: string) => Promise<string | null>
 	configSet: (key: string, value: string) => Promise<void>
-	/** Memos：列表 / 发布 / 删除（后端代理，token 在 CF 环境变量里） */
-	memosList: (limit?: number) => Promise<{ id: string; content: string; createTime: string; visibility: string; pinned: boolean; tags: string[] }[]>
-	memosPublish: (content: string, visibility?: 'PUBLIC' | 'PROTECTED' | 'PRIVATE') => Promise<{ id: string }>
+	/** Memos：列表 / 发布 / 上传图片附件 / 删除（后端代理，token 在 CF 环境变量里） */
+	memosList: (limit?: number) => Promise<
+		{
+			id: string
+			content: string
+			createTime: string
+			visibility: string
+			pinned: boolean
+			tags: string[]
+			attachments: MemoAttachment[]
+		}[]
+	>
+	memosPublish: (
+		content: string,
+		visibility?: MemoVisibility,
+		attachments?: MemoAttachmentRef[]
+	) => Promise<{ id: string; attached: number; warning?: string }>
+	/** 把图片传进 Memos 自己的附件库，返回可直接显示的附件 */
+	memosUpload: (file: File) => Promise<MemoAttachment>
 	memosDelete: (id: string) => Promise<void>
 }
 
@@ -556,12 +597,49 @@ export function installApi(): void {
 
 		// ---------- Memos（后端代理，token 在 CF 环境变量） ----------
 		memosList: async (limit) => {
-			const r = await get<{ memos: Array<{ id: string; content: string; createTime: string; visibility: string; pinned: boolean; tags: string[] }> }>(`/memos?limit=${limit ?? 20}`)
+			const r = await get<{
+				memos: Array<{
+					id: string
+					content: string
+					createTime: string
+					visibility: string
+					pinned: boolean
+					tags: string[]
+					attachments: MemoAttachment[]
+				}>
+			}>(`/memos?limit=${limit ?? 20}`)
 			return r.memos
 		},
-		memosPublish: async (content, visibility) => {
-			const r = await post<{ message: string; id: string }>('/memos', { content, visibility: visibility ?? 'PUBLIC' })
-			return { id: r.id }
+		memosPublish: async (content, visibility, attachments) => {
+			const r = await post<{ message: string; id: string; attached?: number; warning?: string }>('/memos', {
+				content,
+				visibility: visibility ?? 'PUBLIC',
+				attachments: attachments?.length ? attachments : undefined
+			})
+			return { id: r.id, attached: r.attached ?? 0, warning: r.warning }
+		},
+		// 图片进 Memos 原生附件库（不走博客图床）：后端透传 multipart 到
+		// POST /api/v1/attachments，返回附件标识与可直接 <img> 的地址。
+		memosUpload: async (file) => {
+			const token = localStorage.getItem(TOKEN_KEY) ?? ''
+			const fd = new FormData()
+			fd.append('file', file, file.name || 'unnamed')
+			const res = await fetch(`${API_BASE}/api/memos/attachments`, {
+				method: 'POST',
+				headers: token ? { Authorization: `Bearer ${token}` } : {},
+				body: fd
+			})
+			if (res.status === 401) {
+				notifyAuthFailed()
+				throw new Error('登录已失效，请重新登录')
+			}
+			const data = (await res.json().catch(() => ({}))) as {
+				attachment?: Omit<MemoAttachment, 'url'>
+				url?: string
+				error?: string
+			}
+			if (!res.ok || !data.attachment) throw new Error(String(data.error ?? `HTTP ${res.status}`))
+			return { ...data.attachment, url: data.url ?? '' }
 		},
 		memosDelete: async (id) => {
 			await del(`/memos/${encodeURIComponent(id)}`)

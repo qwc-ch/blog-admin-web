@@ -21,6 +21,20 @@
 		visibility: string
 		pinned: boolean
 		tags: string[]
+		/** Memos 原生附件（图片就存在 Memos 那边，不是博客图床） */
+		attachments?: { name: string; filename: string; type: string; url: string }[]
+	}
+	/**
+	 * 待发布图片。`preview` 是本地 object URL：
+	 * Memos 对**还没挂到动态上**的附件匿名返回 403，直接拿附件地址当 `<img src>` 会裂，
+	 * 所以发布前用本地预览图，发布后改用动态自带附件的地址。
+	 */
+	interface PendingImage {
+		name: string
+		id?: string | number
+		uid?: string
+		filename: string
+		preview: string
 	}
 	let memos = $state<MemoItem[]>([])
 	let memosLoading = $state(false)
@@ -28,8 +42,10 @@
 	let visibility = $state<'PUBLIC' | 'PROTECTED' | 'PRIVATE'>('PUBLIC')
 	let publishing = $state(false)
 	let uploading = $state(false)
-	/** 发布框的 textarea 引用：插图要往光标处插引用 */
-	let composeBox = $state<HTMLTextAreaElement | null>(null)
+	/** 已传进 Memos 附件库、等着随这条动态一起挂上去的图片 */
+	let pending = $state<PendingImage[]>([])
+	/** 附件图匿名读不到（私密/保护动态）时按 url 记一笔，显示占位而不是裂图 */
+	let imgFailed = $state<Record<string, boolean>>({})
 	/** 发布成功后自动滚动到最新一条 */
 	let memoListEl = $state<HTMLElement | null>(null)
 	/** 站点预览 iframe：默认折叠，点开才加载（省流量，也避免手机端白屏） */
@@ -85,15 +101,26 @@
 		}
 	}
 
-	/** 发布：成功就清空输入框、刷新列表、滚动到最新一条 */
+	/** 发布：正文 + 待发图片一起发；图片作为 Memos 原生附件挂上去 */
 	async function publishMemo(): Promise<void> {
 		const content = composing.trim()
-		if (!content || publishing) return
+		// 只发图不写字也是合法动态（Memos 自己就支持）
+		if ((!content && !pending.length) || publishing) return
 		publishing = true
 		try {
-			const r = await window.api.memosPublish(content, visibility)
-			notify('已发布到 Memos')
+			const r = await window.api.memosPublish(
+				content,
+				visibility,
+				pending.map((p) => ({ id: p.id, uid: p.uid, name: p.name }))
+			)
+			if (r.warning) {
+				// 动态已经发出去了，只是附件没挂上：照实说，别让人以为整条失败
+				notify(r.warning, false)
+			} else {
+				notify(pending.length ? `已发布到 Memos（附 ${r.attached} 张图）` : '已发布到 Memos')
+			}
 			composing = ''
+			clearPending()
 			await loadMemos()
 			if (r.id && memoListEl) {
 				memoListEl.scrollTop = 0
@@ -105,40 +132,47 @@
 		}
 	}
 
-	/** 把一段文本插入 textarea 的光标处（没有光标就追加到末尾） */
-	function insertAtCursor(text: string): void {
-		const el = composeBox
-		const at = el ? el.selectionStart ?? composing.length : composing.length
-		composing = composing.slice(0, at) + text + composing.slice(at)
-		if (el) {
-			requestAnimationFrame(() => {
-				const pos = at + text.length
-				el.focus()
-				el.selectionStart = pos
-				el.selectionEnd = pos
-			})
+	/** 把文件逐张传进 Memos 附件库，加入待发布列表；返回成功张数 */
+	async function uploadToPending(files: File[]): Promise<number> {
+		let ok = 0
+		for (const f of files) {
+			const a = await window.api.memosUpload(f)
+			pending = [
+				...pending,
+				{ name: a.name, id: a.id, uid: a.uid, filename: a.filename, preview: URL.createObjectURL(f) }
+			]
+			ok++
 		}
+		return ok
 	}
 
-	/** 插图：弹文件选择器 → 逐张传图床 → 以 Markdown 图片引用插入正文 */
+	/** 插图：选本地图片 → 传 Memos 附件库 → 进待发布列表（发布时挂到这条动态上） */
 	async function insertImages(): Promise<void> {
 		if (uploading) return
 		const files = await pickImageFiles()
 		if (!files.length) return
 		uploading = true
 		try {
-			const refs: string[] = []
-			for (const f of files) {
-				const url = await window.api.uploadImage(f)
-				refs.push(`![图片](${url})`)
-			}
-			insertAtCursor(refs.join('\n'))
-			notify(`图片已传到图床（${refs.length} 张），发布后显示在动态里`)
+			const n = await uploadToPending(files)
+			notify(`已上传 ${n} 张图片，发布会作为动态附件显示`)
 		} catch (e) {
 			notify(errMsg(e), false)
 		} finally {
 			uploading = false
 		}
+	}
+
+	/** 从待发布列表里拿掉一张（顺手释放本地预览，别漏内存） */
+	function removePending(i: number): void {
+		const it = pending[i]
+		if (it) URL.revokeObjectURL(it.preview)
+		pending = pending.filter((_, idx) => idx !== i)
+	}
+
+	/** 清空待发布列表并释放所有本地预览 */
+	function clearPending(): void {
+		for (const p of pending) URL.revokeObjectURL(p.preview)
+		pending = []
 	}
 
 	/** 弹文件选择器，只选图片，可多选；取消返回空数组 */
@@ -153,7 +187,7 @@
 		})
 	}
 
-	/** 粘贴图片到发布框：拦下默认行为，直接传图床并插入引用 */
+	/** 粘贴图片到发布框：拦下默认行为，直接进 Memos 附件库 */
 	async function onPaste(e: ClipboardEvent): Promise<void> {
 		const files = [...(e.clipboardData?.items ?? [])]
 			.filter((it) => it.type.startsWith('image/'))
@@ -163,13 +197,8 @@
 		e.preventDefault()
 		uploading = true
 		try {
-			const refs: string[] = []
-			for (const f of files) {
-				const url = await window.api.uploadImage(f)
-				refs.push(`![图片](${url})`)
-			}
-			insertAtCursor(refs.join('\n'))
-			notify(`已粘贴 ${refs.length} 张图片到图床`)
+			const n = await uploadToPending(files)
+			notify(`已粘贴 ${n} 张图片到 Memos 附件库`)
 		} catch (err) {
 			notify(errMsg(err), false)
 		} finally {
@@ -273,13 +302,22 @@
 					class="code dyn-compose-input"
 					rows="3"
 					placeholder="写点什么…（支持 Markdown；可直接粘贴图片）"
-					bind:this={composeBox}
 					bind:value={composing}
 					onkeydown={(e) => {
 						if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') void publishMemo()
 					}}
 					onpaste={onPaste}
 				></textarea>
+				{#if pending.length}
+					<div class="dyn-pending">
+						{#each pending as p, i (p.name)}
+							<div class="dyn-pending-item">
+								<img src={p.preview} alt={p.filename} title={p.filename} />
+								<button class="dyn-pending-x" onclick={() => removePending(i)} title="移除这张">✕</button>
+							</div>
+						{/each}
+					</div>
+				{/if}
 				<div class="row" style="justify-content:space-between; margin-top:8px">
 					<div class="row" style="gap:6px">
 						<label class="row" style="gap:4px">
@@ -290,10 +328,10 @@
 							</select>
 						</label>
 					</div>
-					<button class="btn" onclick={insertImages} disabled={uploading} title="选图片上传到图床，插入引用">
-						{uploading ? '上传中…' : '＋ 插图'}
+					<button class="btn" onclick={insertImages} disabled={uploading} title="选图片上传到 Memos，作为这条动态的附件">
+						{uploading ? '上传中…' : '＋ 图片'}
 					</button>
-					<button class="btn primary" onclick={publishMemo} disabled={publishing || !composing.trim()}>
+					<button class="btn primary" onclick={publishMemo} disabled={publishing || (!composing.trim() && !pending.length)}>
 						{publishing ? '发布中…' : '发布'}
 					</button>
 				</div>
@@ -313,12 +351,28 @@
 					{#each memos as m (m.id)}
 						<div class="dyn-item">
 							<div class="dyn-item-body">{m.content}</div>
-							{#if memoImages(m.content).length}
+							{#if memoImages(m.content).length || m.attachments?.length}
 								<div class="dyn-item-imgs">
 									{#each memoImages(m.content) as src}
 										<a href={src} target="_blank" rel="noopener noreferrer">
 											<img src={src} alt="动态图片" loading="lazy" />
 										</a>
+									{/each}
+									{#each m.attachments ?? [] as a}
+										{#if imgFailed[a.url]}
+											<span class="dyn-img-na" title="非公开动态的图片需要登录 Memos 才能查看">
+												{a.filename || '图片'}
+											</span>
+										{:else}
+											<a href={a.url} target="_blank" rel="noopener noreferrer" title={a.filename}>
+												<img
+													src={a.url}
+													alt={a.filename}
+													loading="lazy"
+													onerror={() => (imgFailed[a.url] = true)}
+												/>
+											</a>
+										{/if}
 									{/each}
 								</div>
 							{/if}
@@ -465,6 +519,59 @@
 		height: 100%;
 		object-fit: cover;
 		display: block;
+	}
+	/* 附件匿名读不到（私密 / 保护动态）时的占位 */
+	.dyn-img-na {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		max-width: 96px;
+		height: 72px;
+		padding: 0 6px;
+		border-radius: 8px;
+		border: 1px dashed var(--line);
+		background: #fff;
+		color: var(--muted);
+		font-size: 11px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	/* 发布框里的待发布图片（本地预览，可单张移除） */
+	.dyn-pending {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px;
+		margin-top: 8px;
+	}
+	.dyn-pending-item {
+		position: relative;
+		width: 72px;
+		height: 72px;
+		border-radius: 8px;
+		overflow: hidden;
+		border: 1px solid var(--line);
+		background: #fff;
+	}
+	.dyn-pending-item img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		display: block;
+	}
+	.dyn-pending-x {
+		position: absolute;
+		top: 2px;
+		right: 2px;
+		width: 18px;
+		height: 18px;
+		padding: 0;
+		line-height: 1;
+		border: none;
+		border-radius: 50%;
+		background: rgba(0, 0, 0, 0.55);
+		color: #fff;
+		font-size: 11px;
+		cursor: pointer;
 	}
 	.dyn-preview {
 		flex-shrink: 0;

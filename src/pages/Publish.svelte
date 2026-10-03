@@ -55,7 +55,7 @@
 </script>
 
 <div class="row" style="justify-content:space-between; margin-bottom:10px">
-	<h2 style="margin:0">🚀 发布上线</h2>
+	<h2 style="margin:0">发布上线</h2>
 	<button class="btn" onclick={load} disabled={loading}>↻ 刷新</button>
 </div>
 
@@ -91,7 +91,7 @@
 	{:else if error}
 		<!-- 读取失败 ≠ 没有提交：这两件事必须分开说，否则会让人以为博客还没提交过 -->
 		<div class="pub-err">
-			<b>⚠️ 读取提交记录失败</b>
+			<b>读取提交记录失败</b>
 			<p class="muted" style="margin:6px 0 0; line-height:1.7; word-break:break-all">{error}</p>
 			<p class="hint" style="margin:8px 0 0">
 				常见原因：Worker 的 <code>GITHUB_TOKEN</code> secret 没配或已失效；

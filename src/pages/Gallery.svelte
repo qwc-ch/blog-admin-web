@@ -127,12 +127,12 @@
 </script>
 
 <div class="row" style="justify-content:space-between; margin-bottom:10px">
-	<h2 style="margin:0">🖼️ 图床管理</h2>
+	<h2 style="margin:0">图床管理</h2>
 	<div class="row">
 		<input placeholder="搜索文件名" bind:value={filter} style="max-width:200px" />
 		<button class="btn" onclick={load} disabled={loading}>↻ 刷新</button>
 		<button class="btn primary" onclick={pick} disabled={uploading}>
-			{uploading ? '上传中…' : picking ? '🖼️ 从相册中选择' : '＋ 上传图片'}
+			{uploading ? '上传中…' : picking ? '从相册中选择' : '＋ 上传图片'}
 		</button>
 	</div>
 </div>
@@ -143,7 +143,7 @@
 		<div class="row" style="justify-content:space-between; gap:10px">
 			<p style="margin:0; line-height:1.7">
 				正在为<b>「{pickingLabel}」</b>选图：<br />
-				① 点右上角<b>「🖼️ 从相册中选择」</b>上传新图（手机上会打开相册，电脑上打开文件选择器），传完自动填回；<br />
+				① 点右上角<b>「从相册中选择」</b>上传新图（手机上会打开相册，电脑上打开文件选择器），传完自动填回；<br />
 				② 或者直接点下面任意一张图的<b>「用作{pickingLabel}」</b>，图床里的现成图也能用。
 			</p>
 			<button class="btn small" onclick={abortPick}>取消，返回设置页</button>

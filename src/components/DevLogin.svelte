@@ -33,7 +33,7 @@
 </script>
 
 <div class="dev-login" class:compact>
-	<span class="dev-tag" title="仅调试环境可用，上线前删除">🔧 调试登录</span>
+	<span class="dev-tag" title="仅调试环境可用，上线前删除">调试登录</span>
 	<form class="row" onsubmit={submit}>
 		<input
 			type="password"

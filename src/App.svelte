@@ -265,7 +265,7 @@
 			}
 		} else if (d.type === 'ff-say') live2dSay = typeof d.text === 'string' ? d.text : ''
 		else if (d.type === 'ff-open-url' && typeof d.url === 'string') {
-			// 看板娘要开外链（🔗 了解流萤）：开新标签，绝不让它在那个小 iframe 里导航
+			// 看板娘要开外链（了解流萤）：开新标签，绝不让它在那个小 iframe 里导航
 			void window.api.openExternal(d.url).catch((err) => notify(errMsg(err), false))
 		} else if (d.type === 'ff-hover' || d.type === 'ff-interact') {
 			// 鼠标停在模型上 / 刚互动过：回到流畅渲染
@@ -292,15 +292,6 @@
 	// 设置页要跳去图床页挑图（见 lib/pick-image.ts），页面跳转只能由 App 改状态
 	setContext('gotoPage', gotoPage)
 
-	const ICONS: Record<string, string> = {
-		posts: '📄',
-		dynamic: '💬',
-		projects: '🧩',
-		spec: '📚',
-		pages: '📚',
-		notes: '📝'
-	}
-
 	/** 集合 → 侧栏标题：常见集合给惯用名，其余用配置里的 label */
 	function collectionLabel(c: CollectionMeta): string {
 		if (c.name === 'posts') return '文章管理'
@@ -310,19 +301,19 @@
 	}
 
 	const nav = $derived.by(() => {
-		const out: { id: string; label: string; icon: string }[] = []
+		const out: { id: string; label: string }[] = []
 		// 动态有专用页（memos 输入框 + 本地发布两栏），走 Dynamics 而不是裸 ContentManager
-		if (collections.some((c) => c.name === 'dynamic')) out.push({ id: 'dynamics', label: '动态发布', icon: '💬' })
+		if (collections.some((c) => c.name === 'dynamic')) out.push({ id: 'dynamics', label: '动态发布' })
 		for (const c of collections) {
 			if (c.name === 'dynamic' || c.name === 'gallery') continue
-			out.push({ id: `c:${c.name}`, label: collectionLabel(c), icon: ICONS[c.name] ?? '🧩' })
+			out.push({ id: `c:${c.name}`, label: collectionLabel(c) })
 		}
 		out.push(
-			{ id: 'gallery', label: '图床管理', icon: '🖼️' },
-			{ id: 'configs', label: '配置中心', icon: '🎛️' },
-			{ id: 'publish', label: '发布上线', icon: '🚀' },
-			{ id: 'trash', label: '回收站', icon: '🗑️' },
-			{ id: 'settings', label: '设置', icon: '⚙️' }
+			{ id: 'gallery', label: '图床管理' },
+			{ id: 'configs', label: '配置中心' },
+			{ id: 'publish', label: '发布上线' },
+			{ id: 'trash', label: '回收站' },
+			{ id: 'settings', label: '设置' }
 		)
 		return out
 	})
@@ -451,7 +442,6 @@
 {#if phase === 'loading'}
 	<div class="ff-boot">
 		<div class="ff-boot-inner">
-			<div class="ff-boot-logo">✨</div>
 			<div class="ff-boot-title">Firefly 后台</div>
 			<div class="ff-boot-sub">正在读取仓库配置…</div>
 		</div>
@@ -533,10 +523,9 @@
 			<div class="ff-drawer-mask" onclick={() => (drawerOpen = false)}></div>
 		{/if}
 		<aside class="sidebar" class:mobile-open={drawerOpen} style={isMobile ? '' : `width:${sidebarW}px`}>
-			<div class="brand">✨ Firefly 后台</div>
+			<div class="brand">Firefly 后台</div>
 			{#each nav as item (item.id)}
 				<button class="nav-item" class:active={page === item.id} onclick={() => gotoPage(item.id)}>
-					<span>{item.icon}</span>
 					<span>{item.label}</span>
 				</button>
 			{/each}
@@ -559,7 +548,7 @@
 		<main class="content">
 			{#if !loggedIn && page !== 'settings'}
 				<div class="card login-hint">
-					<h3>🔒 尚未登录</h3>
+					<h3>尚未登录</h3>
 					<p class="muted" style="line-height:1.8; margin-top:0">
 						内容和配置都存在你的博客仓库里，读取与保存需要 GitHub 授权。<br />
 						登录后左侧的集合菜单会按 <code>.fireflux.yml</code> 自动出现。
@@ -573,7 +562,7 @@
 				</div>
 			{:else if fatal}
 				<div class="card">
-					<h3>⚠️ 读取配置失败</h3>
+					<h3>读取配置失败</h3>
 					<p class="muted">{fatal}</p>
 					<p class="muted">检查 .fireflux.yml 是否已推送到仓库，以及后端 API 地址（VITE_API_URL）是否正确。</p>
 					<button class="btn primary" onclick={() => void boot()}>重试</button>
@@ -584,7 +573,6 @@
 				<ContentManager
 					folder={currentCollection.name}
 					title={collectionLabel(currentCollection)}
-					icon={ICONS[currentCollection.name] ?? '🧩'}
 					canCreate
 					createKind={currentCollection.name === 'projects' ? 'project' : 'post'}
 					createLabel={`新建${currentCollection.label || '内容'}`}
@@ -636,10 +624,6 @@
 		text-align: center;
 		color: #0f766e;
 	}
-	.ff-boot-logo {
-		font-size: 42px;
-		animation: ff-pulse 1.6s ease-in-out infinite;
-	}
 	.ff-boot-title {
 		margin-top: 10px;
 		font-size: 20px;
@@ -649,17 +633,6 @@
 		margin-top: 6px;
 		font-size: 13px;
 		opacity: 0.7;
-	}
-	@keyframes ff-pulse {
-		0%,
-		100% {
-			transform: scale(1);
-			opacity: 0.85;
-		}
-		50% {
-			transform: scale(1.12);
-			opacity: 1;
-		}
 	}
 	.login-hint {
 		max-width: 560px;

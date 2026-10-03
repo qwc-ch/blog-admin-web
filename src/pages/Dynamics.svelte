@@ -27,6 +27,9 @@
 	let composing = $state('')
 	let visibility = $state<'PUBLIC' | 'PROTECTED' | 'PRIVATE'>('PUBLIC')
 	let publishing = $state(false)
+	let uploading = $state(false)
+	/** 发布框的 textarea 引用：插图要往光标处插引用 */
+	let composeBox = $state<HTMLTextAreaElement | null>(null)
 	/** 发布成功后自动滚动到最新一条 */
 	let memoListEl = $state<HTMLElement | null>(null)
 	/** 站点预览 iframe：默认折叠，点开才加载（省流量，也避免手机端白屏） */
@@ -102,6 +105,90 @@
 		}
 	}
 
+	/** 把一段文本插入 textarea 的光标处（没有光标就追加到末尾） */
+	function insertAtCursor(text: string): void {
+		const el = composeBox
+		const at = el ? el.selectionStart ?? composing.length : composing.length
+		composing = composing.slice(0, at) + text + composing.slice(at)
+		if (el) {
+			requestAnimationFrame(() => {
+				const pos = at + text.length
+				el.focus()
+				el.selectionStart = pos
+				el.selectionEnd = pos
+			})
+		}
+	}
+
+	/** 插图：弹文件选择器 → 逐张传图床 → 以 Markdown 图片引用插入正文 */
+	async function insertImages(): Promise<void> {
+		if (uploading) return
+		const files = await pickImageFiles()
+		if (!files.length) return
+		uploading = true
+		try {
+			const refs: string[] = []
+			for (const f of files) {
+				const url = await window.api.uploadImage(f)
+				refs.push(`![图片](${url})`)
+			}
+			insertAtCursor(refs.join('\n'))
+			notify(`图片已传到图床（${refs.length} 张），发布后显示在动态里`)
+		} catch (e) {
+			notify(errMsg(e), false)
+		} finally {
+			uploading = false
+		}
+	}
+
+	/** 弹文件选择器，只选图片，可多选；取消返回空数组 */
+	function pickImageFiles(): Promise<File[]> {
+		return new Promise((resolve) => {
+			const input = document.createElement('input')
+			input.type = 'file'
+			input.accept = 'image/*'
+			input.multiple = true
+			input.onchange = () => resolve([...(input.files ?? [])])
+			input.click()
+		})
+	}
+
+	/** 粘贴图片到发布框：拦下默认行为，直接传图床并插入引用 */
+	async function onPaste(e: ClipboardEvent): Promise<void> {
+		const files = [...(e.clipboardData?.items ?? [])]
+			.filter((it) => it.type.startsWith('image/'))
+			.map((it) => it.getAsFile())
+			.filter((f): f is File => !!f)
+		if (!files.length) return
+		e.preventDefault()
+		uploading = true
+		try {
+			const refs: string[] = []
+			for (const f of files) {
+				const url = await window.api.uploadImage(f)
+				refs.push(`![图片](${url})`)
+			}
+			insertAtCursor(refs.join('\n'))
+			notify(`已粘贴 ${refs.length} 张图片到图床`)
+		} catch (err) {
+			notify(errMsg(err), false)
+		} finally {
+			uploading = false
+		}
+	}
+
+	/** 从 memo 内容里提取 markdown 图片（与主题端展示一致），供列表渲染缩略图 */
+	function memoImages(content: string): string[] {
+		const urls: string[] = []
+		const re = /!\[[^\]]*\]\(([^)]+)\)/g
+		let m: RegExpExecArray | null
+		while ((m = re.exec(content)) !== null) {
+			const src = m[1].trim()
+			if (src && /^(https?:)?\/\//.test(src)) urls.push(src)
+		}
+		return urls
+	}
+
 	async function deleteMemo(m: MemoItem): Promise<void> {
 		if (!(await confirmDanger(`删除这条动态？`, m.content.slice(0, 60), 'Memos 上的这条会被删除，不可恢复。'))) return
 		try {
@@ -154,7 +241,7 @@
 <div class="dyn-page">
 	<div class="dyn-head">
 		<div class="row" style="justify-content:space-between">
-			<h2 style="margin:0">💬 动态发布</h2>
+			<h2 style="margin:0">动态发布</h2>
 			<button class="btn" onclick={refreshAll} disabled={refreshing} title="重新读取动态配置并刷新本地文件列表">
 				↻ 刷新
 			</button>
@@ -170,8 +257,8 @@
 	</div>
 
 	<div class="row" style="margin-bottom:12px">
-		<button class="btn" class:primary={tab === 'remote'} onclick={() => (tab = 'remote')}>🌐 远端发布（Memos）</button>
-		<button class="btn" class:primary={tab === 'local'} onclick={() => (tab = 'local')}>📝 本地发布（文件）</button>
+		<button class="btn" class:primary={tab === 'remote'} onclick={() => (tab = 'remote')}>远端发布（Memos）</button>
+		<button class="btn" class:primary={tab === 'local'} onclick={() => (tab = 'local')}>本地发布（文件）</button>
 	</div>
 
 	{#if tab === 'remote'}
@@ -185,11 +272,13 @@
 				<textarea
 					class="code dyn-compose-input"
 					rows="3"
-					placeholder="写点什么…（支持 Markdown）"
+					placeholder="写点什么…（支持 Markdown；可直接粘贴图片）"
+					bind:this={composeBox}
 					bind:value={composing}
 					onkeydown={(e) => {
 						if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') void publishMemo()
 					}}
+					onpaste={onPaste}
 				></textarea>
 				<div class="row" style="justify-content:space-between; margin-top:8px">
 					<div class="row" style="gap:6px">
@@ -201,6 +290,9 @@
 							</select>
 						</label>
 					</div>
+					<button class="btn" onclick={insertImages} disabled={uploading} title="选图片上传到图床，插入引用">
+						{uploading ? '上传中…' : '＋ 插图'}
+					</button>
 					<button class="btn primary" onclick={publishMemo} disabled={publishing || !composing.trim()}>
 						{publishing ? '发布中…' : '发布'}
 					</button>
@@ -221,10 +313,19 @@
 					{#each memos as m (m.id)}
 						<div class="dyn-item">
 							<div class="dyn-item-body">{m.content}</div>
+							{#if memoImages(m.content).length}
+								<div class="dyn-item-imgs">
+									{#each memoImages(m.content) as src}
+										<a href={src} target="_blank" rel="noopener noreferrer">
+											<img src={src} alt="动态图片" loading="lazy" />
+										</a>
+									{/each}
+								</div>
+							{/if}
 							<div class="row" style="justify-content:space-between; gap:6px">
 								<div class="row" style="gap:6px">
 									<span class="tag">{visLabel(m.visibility)}</span>
-									{#if m.pinned}<span class="tag">📌</span>{/if}
+									{#if m.pinned}<span class="tag">置顶</span>{/if}
 									<span class="muted">{timeStr(m.createTime)}</span>
 								</div>
 								<button class="btn small danger" onclick={() => deleteMemo(m)} disabled={publishing}>删除</button>
@@ -274,7 +375,6 @@
 				<ContentManager
 					folder="dynamic"
 					title="本地动态文件"
-					icon="📝"
 					canCreate
 					createKind="dynamic"
 					createLabel="新建动态"
@@ -343,6 +443,28 @@
 		margin-bottom: 6px;
 		max-height: 120px;
 		overflow: hidden;
+	}
+	.dyn-item-imgs {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px;
+		margin-bottom: 6px;
+	}
+	.dyn-item-imgs a {
+		display: block;
+		width: 72px;
+		height: 72px;
+		border-radius: 8px;
+		overflow: hidden;
+		border: 1px solid var(--line);
+		background: #fff;
+		flex-shrink: 0;
+	}
+	.dyn-item-imgs img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		display: block;
 	}
 	.dyn-preview {
 		flex-shrink: 0;

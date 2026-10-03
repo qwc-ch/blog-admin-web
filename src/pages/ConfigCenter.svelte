@@ -270,15 +270,15 @@
 		<div class="cc-mbar">
 			<button class="btn" onclick={() => (screen = 'list')}>← 配置列表</button>
 			<b>{selected.title}</b>
-			<button class="btn small" onclick={refreshDiscovery}>🔄</button>
+			<button class="btn small" onclick={refreshDiscovery}>↻</button>
 		</div>
 		<div class="cc-mform">
 			{@render form()}
 		</div>
 	{:else}
 		<div class="cc-mbar">
-			<b>🎛️ 配置中心</b>
-			<button class="btn small" onclick={refreshDiscovery}>🔄 重新扫描</button>
+			<b>配置中心</b>
+			<button class="btn small" onclick={refreshDiscovery}>重新扫描</button>
 		</div>
 		<input class="cc-msearch" placeholder="搜索配置…" bind:value={search} />
 		<div class="cc-mlist">
@@ -287,10 +287,10 @@
 	{/if}
 {:else}
 	<div class="row" style="justify-content:space-between; margin-bottom:14px">
-		<h2 style="margin:0">🎛️ 配置中心</h2>
+		<h2 style="margin:0">配置中心</h2>
 		<div class="row">
 			<input placeholder="搜索配置…" bind:value={search} style="max-width:200px" />
-			<button class="btn" onclick={refreshDiscovery}>🔄 重新扫描</button>
+			<button class="btn" onclick={refreshDiscovery}>重新扫描</button>
 		</div>
 	</div>
 

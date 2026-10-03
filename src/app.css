@@ -1,3 +1,11 @@
+/* remio-home 同款字体：汉仪糖美人 55W（HYTMR），本地托管避免 CDN 失效 */
+@font-face {
+	font-family: 'HYTMR';
+	src: url('/fonts/HYTangMeiRen55W.woff2') format('woff2');
+	font-weight: normal;
+	font-style: normal;
+	font-display: swap;
+}
 :root {
 	/* 卡片底色与不透明度：两个变量都由设置页写入（侧栏可单独调） */
 	--panel: 255, 255, 255;
@@ -56,7 +64,7 @@ body.ff-l2d-dragging * {
 	touch-action: none !important;
 }
 body {
-	font-family: 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
+	font-family: 'HYTMR', 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
 	background: linear-gradient(155deg, #eafaf6 0%, #f4fbf8 45%, #fdf8ef 100%);
 	color: var(--text);
 	font-size: 14px;
@@ -325,7 +333,7 @@ fieldset.group > legend {
 }
 
 /* 移动端顶栏与抽屉遮罩：桌面端隐藏。
-   ⚠️ 这两条必须写在 app.css（全局）里，不能写在 App.svelte 的 <style> 里 ——
+   这两条必须写在 app.css（全局）里，不能写在 App.svelte 的 <style> 里 ——
    组件样式是 scoped（选择器带 hash，优先级 0,2,0），会盖过下面媒体查询里的
    `.ff-mobile-bar { display: flex }`（0,1,0），结果就是移动端顶栏永远不出现。 */
 .ff-mobile-bar,
@@ -392,7 +400,7 @@ fieldset.group > legend {
 	}
 
 	/* 侧栏 → 左侧抽屉（默认滑出屏幕外，.mobile-open 时滑入）。
-	   ⚠️ 抽屉**强制不透明**：它上面没有壁纸以外的任何东西可以衬底，
+	   抽屉**强制不透明**：它上面没有壁纸以外的任何东西可以衬底，
 	   「卡片不透明度」拉到 0.3 会让菜单项直接糊在壁纸上，完全看不清。
 	   不透明度设置对抽屉里的界面元素仍然生效（卡片/按钮），只是抽屉底板本身压实。 */
 	.sidebar {

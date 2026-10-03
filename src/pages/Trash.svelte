@@ -104,7 +104,7 @@
 		if (
 			!await confirmDanger(
 				`清空回收站？共 ${entries.length} 条记录。`,
-				'⚠️ 不可恢复：所有已删除的内容（含相册目录与图片）会被永久删除，之后无法再还原。',
+				'不可恢复：所有已删除的内容（含相册目录与图片）会被永久删除，之后无法再还原。',
 				'如果只是想腾地方，建议先逐条看一眼里面有没有还要用的东西；\n误删之后请先「恢复」，再回原位置删除。'
 			)
 		)
@@ -124,7 +124,7 @@
 
 <div class="tr-page">
 	<div class="row" style="justify-content:space-between; margin-bottom:10px">
-		<h2 style="margin:0">🗑️ 回收站</h2>
+		<h2 style="margin:0">回收站</h2>
 		<div class="row">
 			<button class="btn" onclick={load} disabled={busy || loading}>↻ 刷新</button>
 			<button class="btn danger" onclick={emptyAll} disabled={busy || !entries.length}>清空回收站</button>

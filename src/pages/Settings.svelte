@@ -190,7 +190,7 @@
 </script>
 
 <div class="card">
-	<h3>🎨 主题色</h3>
+	<h3>主题色</h3>
 	<div class="row" style="gap:14px; flex-wrap:wrap">
 		{#each ACCENT_PRESETS as a (a.name)}
 			<button
@@ -208,7 +208,7 @@
 </div>
 
 <div class="card" style="margin-top:14px">
-	<h3>🖼️ 后台壁纸</h3>
+	<h3>后台壁纸</h3>
 	{#if wpLoading}
 		<p class="muted">正在读取…</p>
 	{:else}
@@ -217,14 +217,14 @@
 		     手机上必然换行错位。 -->
 		<div class="wp-grid">
 			<div class="wp-slot">
-				<label class="flabel" for="wp-desktop">💻 电脑壁纸</label>
+				<label class="flabel" for="wp-desktop">电脑壁纸</label>
 				<input id="wp-desktop" type="text" bind:value={wpUrl} placeholder="图片 URL（图床直链或任意图片地址）" />
-				<button class="btn small" onclick={() => gotoImgBed('wallpaper-desktop')}>🖼️ 从相册中选择</button>
+				<button class="btn small" onclick={() => gotoImgBed('wallpaper-desktop')}>从相册中选择</button>
 			</div>
 			<div class="wp-slot">
-				<label class="flabel" for="wp-mobile">📱 手机壁纸</label>
+				<label class="flabel" for="wp-mobile">手机壁纸</label>
 				<input id="wp-mobile" type="text" bind:value={wpMobileUrl} placeholder="留空 = 沿用电脑那张" />
-				<button class="btn small" onclick={() => gotoImgBed('wallpaper-mobile')}>🖼️ 从相册中选择</button>
+				<button class="btn small" onclick={() => gotoImgBed('wallpaper-mobile')}>从相册中选择</button>
 			</div>
 		</div>
 		<div class="wp-grid" style="margin-top:14px">
@@ -272,14 +272,14 @@
 		</div>
 		<!-- 当前这台设备实际生效的那张图：分端设置最容易被「我明明填了怎么没变」绕晕 -->
 		<p class="hint wp-now">
-			<span class="tag">{isNarrowViewport() ? '📱 手机壁纸' : '💻 电脑壁纸'}</span>
+			<span class="tag">{isNarrowViewport() ? '手机壁纸' : '电脑壁纸'}</span>
 			<span class="wp-now-url">{currentWallpaperUrl(wallpaperConfig()) || '（未设置壁纸）'}</span>
 		</p>
 	{/if}
 </div>
 
 <div class="card" style="margin-top:14px">
-	<h3>👤 账号</h3>
+	<h3>账号</h3>
 	<div class="row" style="justify-content:space-between; flex-wrap:wrap; gap:10px">
 		<div>
 			<div>后端 API：<code>{API_BASE}</code></div>
@@ -304,7 +304,7 @@
 
 <div class="card" style="margin-top:14px">
 	<div class="row" style="justify-content:space-between; margin-bottom:8px">
-		<h3 style="margin:0">🧩 后台配置（.fireflux.yml）</h3>
+		<h3 style="margin:0">后台配置（.fireflux.yml）</h3>
 		<div class="row">
 			{#if source}<span class="muted">来源：{source}</span>{/if}
 			<button class="btn" onclick={() => (raw = original)} disabled={!dirty}>还原</button>
@@ -323,7 +323,7 @@
 </div>
 
 <div class="card" style="margin-top:14px">
-	<h3>🌸 看板娘</h3>
+	<h3>看板娘</h3>
 	<div class="row" style="justify-content:space-between; flex-wrap:wrap; gap:10px">
 		<!-- 勾选框：全局 input{width:100%} 会把这个勾拉成一条莫名其妙的横条，
 		     这里显式改回 auto，并且让文字跟着勾一起换行而不是掉到下一行 -->
@@ -342,7 +342,7 @@
 			{#if live2dEnabled}
 				<button class="btn small" onclick={onLive2dCollapse}>收起</button>
 				<button class="btn small" onclick={onLive2dExpand}>展开</button>
-				<button class="btn small" onclick={onLive2dResetPos}>📍 重置位置</button>
+				<button class="btn small" onclick={onLive2dResetPos}>重置位置</button>
 			{/if}
 		</div>
 	</div>
@@ -368,7 +368,7 @@
 </div>
 
 <div class="card" style="margin-top:14px">
-	<h3>ℹ️ 关于</h3>
+	<h3>关于</h3>
 	<p class="muted" style="margin:0; line-height:1.7">
 		Firefly 后台（Web 版）· 前端界面移植自 Fireflux 桌面端，后端为 Cloudflare Workers + GitHub API。<br />
 		内容与配置文件都存在博客仓库里，后台不保存副本；每次保存 = 一次 git 提交（改动历史可在仓库里查到）。

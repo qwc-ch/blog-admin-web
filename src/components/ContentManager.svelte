@@ -15,7 +15,6 @@
 		/** 集合名（.fireflux.yml 里的 collections 键，如 posts / dynamic）；不再写死 */
 		folder: string
 		title: string
-		icon?: string
 		canCreate?: boolean
 		createKind?: 'post' | 'project' | 'dynamic'
 		createLabel?: string
@@ -32,7 +31,6 @@
 	let {
 		folder,
 		title,
-		icon = '📄',
 		canCreate = false,
 		createKind,
 		createLabel = '新建',
@@ -89,7 +87,7 @@
 	 * 所以采用**先落盘再插图**：第一次插图 / 粘贴时先把当前正文存成一条真动态，
 	 * 之后的插图、粘贴、保存全部作用在这个文件上。
 	 *
-	 * ⚠️ 落盘之后再保存**必须覆盖同一个文件**（`fileWrite`），不能再 `contentCreate` ——
+	 * 落盘之后再保存**必须覆盖同一个文件**（`fileWrite`），不能再 `contentCreate` ——
 	 * 否则图片留在旧文件旁边的附件目录里，正文却跑到了新文件里，附件立刻变成孤儿。
 	 */
 	let draftRel = $state('')
@@ -109,7 +107,7 @@
 	/**
 	 * 拉文件列表。
 	 *
-	 * ⚠️ 这一步很贵：后端为了拿标题/分类/标签，要把**每个**文件的 frontmatter 解析一遍，
+	 * 这一步很贵：后端为了拿标题/分类/标签，要把**每个**文件的 frontmatter 解析一遍，
 	 * 成本是 `1 + N` 次 GitHub API 请求（1 次 Tree + N 次读文件，并发 8）。
 	 * 而任何写操作都会让后端那份 30s 列表缓存失效 —— 所以「新建完自动刷新列表」
 	 * 恰恰是最贵的一次：新建只花 1 次写入，却要再等 N 次读取才能进编辑器。
@@ -406,7 +404,7 @@
 			}
 			// 窄屏：点「新建」**直接建一条占位内容并跳编辑页**，不再先弹标题/slug 表单。
 			// 原来那个表单要用户填两样东西才进编辑器，手机上多一屏往返；
-			// 而标题写错也能在编辑器里用「✏️ 改名」改（后端原子提交，连正文图片引用一起改）。
+			// 而标题写错也能在编辑器里用「改名」改（后端原子提交，连正文图片引用一起改）。
 			// slug 先用带时间戳的默认值，和动态一致地保证唯一。
 			const placeholder = `untitled-${Date.now().toString(36)}`
 			const title = newTitle.trim() || '未命名'
@@ -420,7 +418,7 @@
 			showNew = false
 			newTitle = ''
 			newSlug = ''
-			// ⚠️ 不要再 `await load()`：那一次列表刷新要让后端重解析**所有**文章的
+			// 不要再 `await load()`：那一次列表刷新要让后端重解析**所有**文章的
 			// frontmatter（1 + N 次 GitHub 请求，写操作刚把缓存打掉了），
 			// 新建明明只花了一次写入，却要再等 N 次读取才进编辑器 —— 这就是「新建很慢」。
 			// 新条目是我们自己建的、字段全知道，先本地插到最前面让界面立刻可用；
@@ -638,18 +636,18 @@
 <div class="row" style="justify-content:space-between; margin-bottom:10px">
 	{#if embedded}
 		<div class="row">
-			<h3 style="margin:0">{icon} {title}</h3>
+			<h3 style="margin:0">{title}</h3>
 			<span class="muted">共 {items.length} 个文件</span>
 		</div>
 	{:else}
-		<h2 style="margin:0">{icon} {title}</h2>
+		<h2 style="margin:0">{title}</h2>
 	{/if}
 	<div class="row">
 		<button class="btn" onclick={refresh} disabled={refreshing} title="重新从磁盘同步文件列表与当前内容">
 			↻ 刷新
 		</button>
 		{#if canImage}
-			<button class="btn" onclick={addImage}>🖼️ 插图（传图床）</button>
+			<button class="btn" onclick={addImage}>插图（传图床）</button>
 		{/if}
 
 		{#if canCreate}
@@ -735,9 +733,9 @@
 				<code style="font-size:12.5px">{active || '（未保存的新动态）'}</code>
 				<div class="row">
 					<div class="row seg">
-						<button class="btn small" class:primary={viewMode === 'edit'} onclick={() => (viewMode = 'edit')}>✏️ 编辑</button>
-						<button class="btn small" class:primary={viewMode === 'split'} onclick={() => (viewMode = 'split')}>⬒ 分屏</button>
-						<button class="btn small" class:primary={viewMode === 'preview'} onclick={() => (viewMode = 'preview')}>👁 预览</button>
+						<button class="btn small" class:primary={viewMode === 'edit'} onclick={() => (viewMode = 'edit')}>编辑</button>
+						<button class="btn small" class:primary={viewMode === 'split'} onclick={() => (viewMode = 'split')}>分屏</button>
+						<button class="btn small" class:primary={viewMode === 'preview'} onclick={() => (viewMode = 'preview')}>预览</button>
 					</div>
 					{#if dirty}<span class="tag" style="background:#fff3cd; color:#8a6d3b">未保存</span>{/if}
 					{#if active}
@@ -748,16 +746,16 @@
 								disabled={busy}
 								title="复制一份（文件名加「-副本」后缀；正文的图片引用会一起改）"
 							>
-								🧬 克隆
+								克隆
 							</button>
 						{/if}
 						{#if hasFeat('rename_id')}
 							<button class="btn" onclick={rename} disabled={busy} title="重命名当前文件 slug（目录式条目会同步改目录和正文引用）">
-								✏️ 改名
+								改名
 							</button>
 						{/if}
 						{#if hasFeat('git_log')}
-							<button class="btn" onclick={showLog} disabled={busy} title="这个文件的提交历史">🕘 历史</button>
+							<button class="btn" onclick={showLog} disabled={busy} title="这个文件的提交历史">历史</button>
 						{/if}
 						<button class="btn" onclick={remove}>删除</button>
 					{/if}
@@ -827,7 +825,7 @@
 			<button class="btn" onclick={backToList}>← 文件列表</button>
 			<code class="cm-mfile">{active || '（未保存的新动态）'}</code>
 			{#if canImage}
-				<button class="btn small" onclick={addImage} title="插入本地图片（上传到图床）">🖼️</button>
+				<button class="btn small" onclick={addImage} title="插入本地图片（上传到图床）">插图</button>
 			{/if}
 			<button class="btn small" onclick={refresh} disabled={refreshing} title="重新从磁盘同步当前内容">↻</button>
 		</div>
@@ -837,7 +835,7 @@
 	{:else}
 		<!-- 列表屏：标题 + 整块「新建」 + 搜索 + 占满剩余高度的文件列表 -->
 		<div class="cm-mbar">
-			<b>{icon} {title}</b>
+			<b>{title}</b>
 			<span class="muted">共 {items.length} 篇</span>
 			<button class="btn small" onclick={refresh} disabled={refreshing} title="重新从磁盘同步文件列表">↻</button>
 		</div>
@@ -868,7 +866,7 @@
 {#if showLogPanel}
 	<div class="card" style="margin-top:12px">
 		<div class="row" style="justify-content:space-between; margin-bottom:8px">
-			<h3 style="margin:0">🕘 提交历史</h3>
+			<h3 style="margin:0">提交历史</h3>
 			<button class="btn small" onclick={() => (showLogPanel = false)}>关闭</button>
 		</div>
 		{#if !logItems.length}

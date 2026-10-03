@@ -35,4 +35,4 @@
 	}
 </script>
 
-<button class="btn small" onclick={pick} disabled={busy}>{busy ? '上传中…' : `📂 ${label}`}</button>
+<button class="btn small" onclick={pick} disabled={busy}>{busy ? '上传中…' : label}</button>

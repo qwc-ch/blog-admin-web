@@ -81,7 +81,7 @@
 	>
 		<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
 		<div class="cf-box" bind:this={boxEl} onclick={(e) => e.stopPropagation()}>
-			<h3 id="cf-title" class="cf-title">⚠️ {req.title}</h3>
+			<h3 id="cf-title" class="cf-title">{req.title}</h3>
 			{#if req.detail}
 				<p class="cf-line">{req.detail}</p>
 			{/if}

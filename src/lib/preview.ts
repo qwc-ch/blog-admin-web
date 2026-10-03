@@ -62,7 +62,7 @@ function transformGithubDirective(md: string): string {
 	return md.replace(/::github\{repo=["']([^"']+)["']\}/g, (_m, repo: string) => {
 		const safe = repo.replace(/[<>"'`]/g, '')
 		const [owner, name] = safe.split('/')
-		return `<a class="gh-card" href="https://github.com/${safe}" target="_blank" rel="noreferrer"><span class="gh-icon">⭐</span><span class="gh-name">${owner ?? ''}<b>/${name ?? ''}</b></span><span class="gh-sub">GitHub 仓库</span></a>`
+		return `<a class="gh-card" href="https://github.com/${safe}" target="_blank" rel="noreferrer"><span class="gh-name">${owner ?? ''}<b>/${name ?? ''}</b></span><span class="gh-sub">GitHub 仓库</span></a>`
 	})
 }
 
